@@ -6,7 +6,7 @@
 [![Android](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)](#)
 [![Kotlin](https://img.shields.io/badge/Kotlin-0095D5?style=for-the-badge&logo=kotlin&logoColor=white)](#)
 [![SQLite](https://img.shields.io/badge/SQLite-07405E?style=for-the-badge&logo=sqlite&logoColor=white)](#)
-[![Gemini API](https://img.shields.io/badge/Gemini_3.5-8E75B2?style=for-the-badge&logo=google&logoColor=white)](#)
+[![Gemini API](https://img.shields.io/badge/Gemini_-8E75B2?style=for-the-badge&logo=google&logoColor=white)](#)
 
 *Transforming unstructured campus schedules into actionable intelligence.*
 
@@ -41,9 +41,9 @@ Built on a zero-knowledge, privacy-first mobile architecture keeping all academi
 
 ---
 
-### 👥 Team: Day One Devs (Code Build 1.0)
+### 👥 Team: Day One Devs
 
-| Name | Hackathon Role |
+| Name | Role |
 | :--- | :--- |
 | **Sanidhya Purohit** | Team Leader, Lead Developer & Product Architect |
 | **Atishay Jain** | Project Coordinator & Presentation Framework |
