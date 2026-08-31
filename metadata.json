@@ -1,0 +1,8 @@
+{
+  "name": "AttendOS",
+  "description": "Intelligent attendance operating system featuring automated timetable scanning, predictive leave planning, gamified streaks, and unignorable class alerts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,39 @@
+# Android & Gradle Build Files
+*.iml
+.gradle
+.kotlin
+/build
+/*/build
+/captures
+.externalNativeBuild
+.cxx
+
+# IDE & Editor Configurations
+.idea/
+*.ipr
+*.iws
+.vscode/
+
+# Local & Environment Configuration (SENSITIVE - NEVER COMMIT)
+.env
+.env.local
+.env.*.local
+local.properties
+/local.properties
+
+# Keystores & Signing Keys (SENSITIVE - NEVER COMMIT)
+*.jks
+*.keystore
+*.p12
+*.key
+*.pem
+debug.keystore
+debug.keystore.base64
+
+# Firebase / Cloud Secrets (if added by developer)
+google-services.json
+
+# OS Specific
+.DS_Store
+Thumbs.db
+
