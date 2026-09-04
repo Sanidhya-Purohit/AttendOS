@@ -61,6 +61,8 @@ fun SettingsDialog(
     var friAlarm by remember(profile) { mutableStateOf(profile?.friAlarmTime ?: "08:00 AM") }
     var satAlarm by remember(profile) { mutableStateOf(profile?.satAlarmTime ?: "08:00 AM") }
 
+    var showSemesterDialog by remember { mutableStateOf(false) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = DarkSurface,
@@ -439,6 +441,26 @@ fun SettingsDialog(
                     }
                 }
 
+                // ACADEMIC LIFECYCLE & DATA ARCHIVES
+                item {
+                    Divider(color = DarkBorder, modifier = Modifier.padding(vertical = 4.dp))
+                    Text("ACADEMIC LIFECYCLE & DATA ARCHIVES", fontWeight = FontWeight.Bold, color = NeonCyan, fontSize = 11.sp)
+                }
+
+                item {
+                    Button(
+                        onClick = { showSemesterDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan.copy(alpha = 0.15f), contentColor = NeonCyan),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.School, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Semester Lifecycle, PDF / CSV & Backups", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+
                 // RE-UPLOAD OR RESET SETUP
                 item {
                     Divider(color = DarkBorder, modifier = Modifier.padding(vertical = 4.dp))
@@ -460,6 +482,8 @@ fun SettingsDialog(
                         Text("Re-Upload Timetable / Re-Run Setup", fontWeight = FontWeight.Bold)
                     }
                 }
+
+
             }
         },
         confirmButton = {
@@ -493,13 +517,20 @@ fun SettingsDialog(
                     viewModel.updateProfile(updated)
                     onDismiss()
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black),
+                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = ButtonTextOnPrimary),
                 modifier = Modifier.testTag("btn_save_settings")
             ) {
                 Text("Save Settings", fontWeight = FontWeight.Bold)
             }
         }
     )
+
+    if (showSemesterDialog) {
+        SemesterManagementDialog(
+            viewModel = viewModel,
+            onDismiss = { showSemesterDialog = false }
+        )
+    }
 }
 
 @Composable

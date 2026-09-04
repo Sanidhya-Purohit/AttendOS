@@ -47,6 +47,9 @@ fun CircularAttendanceGauge(
         label = "GaugeProgress"
     )
 
+    val trackColor = DarkBorder
+    val arcColor = tier.displayColor
+
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
@@ -59,7 +62,7 @@ fun CircularAttendanceGauge(
 
             // Track Background
             drawCircle(
-                color = DarkBorder,
+                color = trackColor,
                 radius = radius,
                 style = Stroke(width = strokeWidth.toPx())
             )
@@ -71,9 +74,9 @@ fun CircularAttendanceGauge(
             drawArc(
                 brush = Brush.sweepGradient(
                     listOf(
-                        tier.color.copy(alpha = 0.7f),
-                        tier.color,
-                        tier.color
+                        arcColor.copy(alpha = 0.7f),
+                        arcColor,
+                        arcColor
                     )
                 ),
                 startAngle = -90f,
@@ -90,7 +93,7 @@ fun CircularAttendanceGauge(
                     style = MaterialTheme.typography.titleMedium.copy(
                         fontWeight = FontWeight.Black,
                         fontSize = if (size > 90.dp) 18.sp else 14.sp,
-                        color = tier.color
+                        color = tier.displayColor
                     )
                 )
                 if (size > 90.dp) {
@@ -113,10 +116,11 @@ fun TierBadge(
     tier: AttendanceTier,
     modifier: Modifier = Modifier
 ) {
+    val tierColor = tier.displayColor
     Surface(
-        color = tier.color.copy(alpha = 0.15f),
+        color = tier.badgeBgColor,
         shape = RoundedCornerShape(8.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, tier.color.copy(alpha = 0.5f)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, tierColor.copy(alpha = 0.5f)),
         modifier = modifier.testTag("tier_badge_${tier.name}")
     ) {
         Row(
@@ -127,14 +131,14 @@ fun TierBadge(
                 modifier = Modifier
                     .size(6.dp)
                     .clip(CircleShape)
-                    .background(tier.color)
+                    .background(tierColor)
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = tier.badgeLabel,
                 style = MaterialTheme.typography.labelSmall.copy(
                     fontWeight = FontWeight.Bold,
-                    color = tier.color,
+                    color = tierColor,
                     fontSize = 11.sp
                 )
             )
@@ -224,76 +228,140 @@ fun EmergencyBufferPill(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        color = if (isEnabled) DarkSurfaceElevated else DarkSurfaceCard,
+        color = if (isEnabled) AppTheme.colors.surfaceElevated else AppTheme.colors.surfaceCard,
         shape = RoundedCornerShape(16.dp),
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
-            if (isEnabled) NeonCyan.copy(alpha = 0.4f) else DarkBorder
+            if (isEnabled) AppTheme.colors.secondary.copy(alpha = 0.4f) else AppTheme.colors.cardBorder
         ),
-        modifier = modifier.testTag("emergency_buffer_pill")
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("emergency_buffer_pill")
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
         ) {
-            Icon(
-                Icons.Default.Shield,
-                contentDescription = "Emergency Buffer",
-                tint = if (isEnabled) NeonCyan else TextMuted,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Column {
-                Text(
-                    text = "Emergency Leave Buffer: ${if (isEnabled) "$bufferCount classes" else "OFF"}",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = if (isEnabled) TextPrimary else TextSecondary,
-                        fontSize = 12.sp
-                    )
-                )
-                Text(
-                    text = if (isEnabled) "Protected for sickness/fests" else "Raw calculation mode",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        color = TextMuted,
-                        fontSize = 10.sp
-                    )
+            // Top Row: Shield Icon + Title & Description + Switch
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isEnabled) AppTheme.colors.secondary.copy(alpha = 0.15f)
+                                else AppTheme.colors.cardBorder.copy(alpha = 0.3f)
+                            )
+                    ) {
+                        Icon(
+                            Icons.Default.Shield,
+                            contentDescription = "Emergency Buffer",
+                            tint = if (isEnabled) AppTheme.colors.secondary else AppTheme.colors.textMuted,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Emergency Buffer",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    color = AppTheme.colors.textPrimary,
+                                    fontSize = 13.sp
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                color = if (isEnabled) AppTheme.colors.secondary.copy(alpha = 0.15f) else AppTheme.colors.cardBorder.copy(alpha = 0.3f),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text(
+                                    text = if (isEnabled) "ACTIVE" else "OFF",
+                                    color = if (isEnabled) AppTheme.colors.secondary else AppTheme.colors.textMuted,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 9.sp,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = if (isEnabled) "Protects bunks from sickness & fests" else "Raw calculation mode",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                color = AppTheme.colors.textSecondary,
+                                fontSize = 11.sp
+                            )
+                        )
+                    }
+                }
+
+                Switch(
+                    checked = isEnabled,
+                    onCheckedChange = { onToggle() },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = AppTheme.colors.secondary,
+                        uncheckedThumbColor = AppTheme.colors.textMuted,
+                        uncheckedTrackColor = AppTheme.colors.surfaceCard
+                    ),
+                    modifier = Modifier.testTag("switch_emergency_buffer")
                 )
             }
-            Spacer(modifier = Modifier.weight(1f))
 
+            // Sub-row: If enabled, clean Stepper for reserved allowance
             if (isEnabled) {
-                IconButton(
-                    onClick = { if (bufferCount > 1) onAdjustCount(bufferCount - 1) },
-                    modifier = Modifier.size(28.dp).testTag("btn_buffer_minus")
+                Spacer(modifier = Modifier.height(10.dp))
+                HorizontalDivider(color = AppTheme.colors.cardBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Default.Remove, contentDescription = "Decrease Buffer", tint = NeonCyan, modifier = Modifier.size(16.dp))
-                }
-                Text(
-                    text = "$bufferCount",
-                    fontWeight = FontWeight.Black,
-                    color = NeonCyan,
-                    modifier = Modifier.padding(horizontal = 4.dp)
-                )
-                IconButton(
-                    onClick = { if (bufferCount < 10) onAdjustCount(bufferCount + 1) },
-                    modifier = Modifier.size(28.dp).testTag("btn_buffer_plus")
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Increase Buffer", tint = NeonCyan, modifier = Modifier.size(16.dp))
+                    Text(
+                        text = "Reserved Buffer Allowance:",
+                        fontSize = 12.sp,
+                        color = AppTheme.colors.textSecondary,
+                        fontWeight = FontWeight.Medium
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .background(AppTheme.colors.surfaceCard, RoundedCornerShape(8.dp))
+                            .border(1.dp, AppTheme.colors.cardBorder, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    ) {
+                        IconButton(
+                            onClick = { if (bufferCount > 1) onAdjustCount(bufferCount - 1) },
+                            modifier = Modifier.size(28.dp).testTag("btn_buffer_minus")
+                        ) {
+                            Icon(Icons.Default.Remove, contentDescription = "Decrease Buffer", tint = AppTheme.colors.secondary, modifier = Modifier.size(16.dp))
+                        }
+                        Text(
+                            text = "$bufferCount class${if (bufferCount > 1) "es" else ""}",
+                            fontWeight = FontWeight.Bold,
+                            color = AppTheme.colors.textPrimary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 6.dp)
+                        )
+                        IconButton(
+                            onClick = { if (bufferCount < 10) onAdjustCount(bufferCount + 1) },
+                            modifier = Modifier.size(28.dp).testTag("btn_buffer_plus")
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = "Increase Buffer", tint = AppTheme.colors.secondary, modifier = Modifier.size(16.dp))
+                        }
+                    }
                 }
             }
-
-            Switch(
-                checked = isEnabled,
-                onCheckedChange = { onToggle() },
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Color.Black,
-                    checkedTrackColor = NeonCyan,
-                    uncheckedThumbColor = TextMuted,
-                    uncheckedTrackColor = DarkSurface
-                ),
-                modifier = Modifier.padding(start = 6.dp).testTag("switch_emergency_buffer")
-            )
         }
     }
 }

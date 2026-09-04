@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.local.entity.AttendanceRecordEntity
+import com.example.ui.components.AttendOSDatePickerDialog
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.AttendanceViewModel
 import java.text.SimpleDateFormat
@@ -37,6 +38,7 @@ enum class MissedClassesFilter(val label: String) {
     TODAY("Today"),
     LAST_WEEK("Last Week"),
     LAST_MONTH("Last Month"),
+    SPECIFIC_DATE("Pick Date"),
     ALL_TIME("All Time")
 }
 
@@ -50,6 +52,10 @@ fun MissedClassesDialog(
 
     var selectedFilter by remember { mutableStateOf(MissedClassesFilter.TODAY) }
     var selectedSubjectId by remember { mutableStateOf<Long?>(null) }
+    var customSelectedDateStr by remember {
+        mutableStateOf(SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Calendar.getInstance().time))
+    }
+    var isDatePickerOpen by remember { mutableStateOf(false) }
 
     // Date calculations
     val todayStr = remember {
@@ -69,7 +75,7 @@ fun MissedClassesDialog(
     }
 
     // Filter only ABSENT records matching the time range and subject
-    val missedRecords = remember(allRecords, selectedFilter, selectedSubjectId) {
+    val missedRecords = remember(allRecords, selectedFilter, selectedSubjectId, customSelectedDateStr) {
         allRecords.filter { record ->
             val isAbsent = record.status == "ABSENT"
             val matchesSubject = selectedSubjectId == null || record.subjectId == selectedSubjectId
@@ -77,6 +83,7 @@ fun MissedClassesDialog(
                 MissedClassesFilter.TODAY -> record.date == todayStr
                 MissedClassesFilter.LAST_WEEK -> record.date >= oneWeekAgoDateStr
                 MissedClassesFilter.LAST_MONTH -> record.date >= oneMonthAgoDateStr
+                MissedClassesFilter.SPECIFIC_DATE -> record.date == customSelectedDateStr
                 MissedClassesFilter.ALL_TIME -> true
             }
             isAbsent && matchesSubject && matchesTime
@@ -160,17 +167,59 @@ fun MissedClassesDialog(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(10.dp))
-                                .clickable { selectedFilter = filter }
+                                .clickable {
+                                    selectedFilter = filter
+                                    if (filter == MissedClassesFilter.SPECIFIC_DATE) {
+                                        isDatePickerOpen = true
+                                    }
+                                }
                         ) {
                             Text(
                                 text = filter.label,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (isSelected) Color.White else TextSecondary,
                                 modifier = Modifier
                                     .padding(vertical = 8.dp)
                                     .fillMaxWidth(),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
+                }
+
+                // If "Pick Date" filter selected, show active date selector badge
+                if (selectedFilter == MissedClassesFilter.SPECIFIC_DATE) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Surface(
+                        color = NeonCrimson.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, NeonCrimson.copy(alpha = 0.4f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { isDatePickerOpen = true }
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = NeonCrimson, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Filtering Absences on: $customSelectedDateStr",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+                            Text(
+                                text = "Change Date",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = NeonCyan
                             )
                         }
                     }
@@ -384,5 +433,17 @@ fun MissedClassesDialog(
                 }
             }
         }
+    }
+
+    if (isDatePickerOpen) {
+        AttendOSDatePickerDialog(
+            title = "Select Date for Absence Audit",
+            initialDate = customSelectedDateStr,
+            onDateSelected = { date ->
+                customSelectedDateStr = date
+                isDatePickerOpen = false
+            },
+            onDismiss = { isDatePickerOpen = false }
+        )
     }
 }

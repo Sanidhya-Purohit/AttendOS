@@ -30,7 +30,18 @@ data class ChatMessage(
     val id: String = java.util.UUID.randomUUID().toString(),
     val sender: String, // "user" or "ai"
     val text: String,
-    val timestamp: Long = System.currentTimeMillis()
+    val imageBitmap: Bitmap? = null,
+    val timestamp: Long = System.currentTimeMillis(),
+    val isFallback: Boolean = false,
+    val isLiked: Boolean? = null // null = unrated, true = liked, false = disliked
+)
+
+data class ChatConversation(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String = "New chat",
+    val messages: List<ChatMessage> = emptyList(),
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 class GeminiService {
@@ -48,24 +59,25 @@ class GeminiService {
     ): Result<List<ParsedSubjectSlot>> = withContext(Dispatchers.IO) {
         val apiKey = customApiKey?.takeIf { it.isNotBlank() } ?: BuildConfig.GEMINI_API_KEY
         if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
-            // Return intelligent fallback DTU parsed schedule
-            return@withContext Result.success(getFallbackDTUSlots())
+            return@withContext Result.failure(Exception("Gemini API key is not configured."))
         }
 
         try {
             val base64Image = bitmapToBase64(bitmap)
             val prompt = """
-                You are an expert academic timetable and course schedule extractor.
-                Carefully analyze this timetable (image or rendered document page).
-                Extract EVERY course/subject, credit rating (default 4 for lecture, 2 for lab, 3 for elective if unspecified), and all scheduled classes.
+                Analyze this academic timetable image and extract all scheduled course slots.
                 
-                Return ONLY a valid JSON array of objects following this exact schema:
+                IMPORTANT:
+                - Only extract courses, rooms, and timings that are strictly visible on this timetable. Never invent, guess, or randomly assign any subjects (like Economics, etc.) if they are not written on the schedule.
+                - If an AEC, VAC, SEC, or Elective slot appears (or is marked as selected), extract it using its written course title, or as "AEC / VAC (Selected)" or "Elective (Selected)".
+                
+                Return ONLY a valid JSON array of objects following this schema:
                 [
                   {
                     "subjectName": "Software Engineering",
                     "subjectCode": "SE-301",
                     "credits": 4,
-                    "dayOfWeek": 1, 
+                    "dayOfWeek": 1,
                     "startTime": "09:00 AM",
                     "endTime": "10:00 AM",
                     "location": "Pragya Bhavan PB-02",
@@ -77,10 +89,10 @@ class GeminiService {
                 Rules:
                 - dayOfWeek: 1 for Monday, 2 for Tuesday, 3 for Wednesday, 4 for Thursday, 5 for Friday, 6 for Saturday.
                 - startTime and endTime format: "09:00 AM", "10:00 AM", "02:00 PM", etc.
-                - location: specific room, hall or lab (e.g. Pragya Bhavan PB-02, AB-4 Room 204, SPS-09, Tech Wing Tw-1, Mech Lab).
+                - location: specific room, hall or lab per class if shown.
                 - slotType: "Lecture", "Lab", or "Tutorial".
-                - category: "Core", "Elective", or "Lab".
-                - credits: integer credits for the course (typically 1 to 5).
+                - category: "Core", "Elective", "VAC", "AEC", "SEC", or "Lab".
+                - credits: integer credits (default 4 for lecture, 2 for lab, 2-3 for VAC/AEC/Elective).
             """.trimIndent()
 
             val requestJson = JSONObject().apply {
@@ -111,7 +123,7 @@ class GeminiService {
 
             val requestBody = requestJson.toString().toRequestBody(jsonMediaType)
             val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey")
+                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$apiKey")
                 .post(requestBody)
                 .build()
 
@@ -119,17 +131,17 @@ class GeminiService {
             val responseBody = response.body?.string() ?: ""
 
             if (!response.isSuccessful) {
-                return@withContext Result.success(getFallbackDTUSlots())
+                return@withContext Result.failure(Exception("Gemini analysis returned HTTP ${response.code}"))
             }
 
             val parsedList = parseSlotsFromJson(responseBody)
             if (parsedList.isNotEmpty()) {
                 Result.success(parsedList)
             } else {
-                Result.success(getFallbackDTUSlots())
+                Result.failure(Exception("No timetable slots detected in this image."))
             }
         } catch (e: Exception) {
-            Result.success(getFallbackDTUSlots())
+            Result.failure(e)
         }
     }
 
@@ -139,25 +151,25 @@ class GeminiService {
     ): Result<List<ParsedSubjectSlot>> = withContext(Dispatchers.IO) {
         val apiKey = customApiKey?.takeIf { it.isNotBlank() } ?: BuildConfig.GEMINI_API_KEY
         if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
-            return@withContext Result.success(getFallbackDTUSlots())
+            return@withContext Result.failure(Exception("Gemini API key is not configured."))
         }
 
         try {
             val prompt = """
-                You are an expert academic timetable and course schedule extractor for AttendOS.
-                Carefully analyze this timetable text / schedule data:
+                Analyze this academic timetable text/schedule data and extract all scheduled courses and class slots:
                 $timetableText
-
-                Extract EVERY course/subject, credit rating (default 4 for lecture, 2 for lab, 3 for elective/VAC/SEC if unspecified), and all scheduled classes for each day of the week.
-                If any elective or VAC (Value Addition Course) or Open Elective is present, name it clearly (e.g. "VAC Elective (Tap to Select)") so the student can customize it.
-
-                Return ONLY a valid JSON array of objects following this exact schema:
+                
+                IMPORTANT:
+                - Extract ONLY the courses and timings explicitly written in this text. Never invent or randomly assign courses that are not written.
+                - If any AEC, VAC, SEC, or Elective is mentioned or marked as selected, extract it with its written name, or as "AEC / VAC (Selected)" or "Elective (Selected)".
+                
+                Return ONLY a valid JSON array of objects following this schema:
                 [
                   {
                     "subjectName": "Software Engineering",
                     "subjectCode": "SE-301",
                     "credits": 4,
-                    "dayOfWeek": 1, 
+                    "dayOfWeek": 1,
                     "startTime": "09:00 AM",
                     "endTime": "10:00 AM",
                     "location": "Pragya Bhavan PB-02",
@@ -165,14 +177,14 @@ class GeminiService {
                     "category": "Core"
                   }
                 ]
-
+                
                 Rules:
                 - dayOfWeek: 1 for Monday, 2 for Tuesday, 3 for Wednesday, 4 for Thursday, 5 for Friday, 6 for Saturday.
                 - startTime and endTime format: "08:00 AM", "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM", "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", etc.
-                - location: specific room, hall or lab per class (e.g. Pragya Bhavan PB-02, AB-4 Room 204, SPS-09, Tech Wing Tw-1, Mech Lab).
+                - location: room, hall, or lab if provided.
                 - slotType: "Lecture", "Lab", or "Tutorial".
-                - category: "Core", "Elective", "VAC", "SEC", or "Lab".
-                - credits: integer credits for the course (typically 1 to 5).
+                - category: "Core", "Elective", "VAC", "AEC", "SEC", or "Lab".
+                - credits: integer credits (default 4 for lecture, 2 for lab, 2-3 for VAC/AEC/Elective).
             """.trimIndent()
 
             val requestJson = JSONObject().apply {
@@ -196,7 +208,7 @@ class GeminiService {
 
             val requestBody = requestJson.toString().toRequestBody(jsonMediaType)
             val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey")
+                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$apiKey")
                 .post(requestBody)
                 .build()
 
@@ -204,17 +216,17 @@ class GeminiService {
             val responseBody = response.body?.string() ?: ""
 
             if (!response.isSuccessful) {
-                return@withContext Result.success(getFallbackDTUSlots())
+                return@withContext Result.failure(Exception("Gemini analysis returned HTTP ${response.code}"))
             }
 
             val parsedList = parseSlotsFromJson(responseBody)
             if (parsedList.isNotEmpty()) {
                 Result.success(parsedList)
             } else {
-                Result.success(getFallbackDTUSlots())
+                Result.failure(Exception("No timetable slots detected in this text."))
             }
         } catch (e: Exception) {
-            Result.success(getFallbackDTUSlots())
+            Result.failure(e)
         }
     }
 
@@ -222,51 +234,127 @@ class GeminiService {
         studentContext: String,
         userQuery: String,
         customApiKey: String? = null
-    ): String = withContext(Dispatchers.IO) {
+    ): String {
+        val result = askAttendanceAdvisorMultimodal(studentContext, userQuery, null, emptyList(), customApiKey)
+        return result.getOrNull() ?: getLocalRuleBasedAdvice(studentContext, userQuery)
+    }
+
+    suspend fun askAttendanceAdvisorMultimodal(
+        studentContext: String,
+        userQuery: String,
+        imageBitmap: Bitmap? = null,
+        recentMessages: List<ChatMessage> = emptyList(),
+        customApiKey: String? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
         val apiKey = customApiKey?.takeIf { it.isNotBlank() } ?: BuildConfig.GEMINI_API_KEY
         if (apiKey.isBlank() || apiKey == "MY_GEMINI_API_KEY") {
-            return@withContext getLocalRuleBasedAdvice(studentContext, userQuery)
+            return@withContext Result.failure(Exception("Gemini API key is not configured."))
         }
 
         try {
             val systemPrompt = """
-                You are AttendOS AI - the premier intelligent attendance operating system and strategist for university students.
-                The 75% attendance criteria is mandatory for sitting in Midsem & Endsem exams.
-                You are aware of DTU campus locations like Pragya Bhavan, AB-4, SPS, Tw-1, Mech/Elect blocks.
+                You are AttendOS AI, the intelligent on-device academic attendance operating system and strategist.
+                You have FULL, DIRECT, UNRESTRICTED ACCESS to all on-device student data provided below.
+                The data below represents the COMPLETE, AUTHORITATIVE GROUND TRUTH of the student's academic standing, timetable, and attendance history.
                 
-                CURRENT STUDENT REAL-TIME DATA:
+                ==============================================
+                AUTHORITATIVE ON-DEVICE STUDENT DATA SNAPSHOT:
+                ==============================================
                 $studentContext
+                ==============================================
                 
-                Respond in a punchy, sharp, super helpful, high-IQ DTU student tone. 
-                Always calculate exact numbers, bunk margins, emergency buffer protection, and clear "GO / SKIP / DANGER" recommendations.
-                Keep responses concise, scannable with bullet points, and directly actionable.
+                CRITICAL OPERATIONAL RULES & MANDATES (STRICT COMPLIANCE REQUIRED):
+                1. NEVER ASK THE USER FOR DATA ALREADY PRESENT ABOVE:
+                   - All subject names, course codes, conducted classes, attended classes, attendance percentages, target thresholds, weekly timetable schedules, today's schedule, tomorrow's schedule, holiday calendars, and absence logs are ALREADY PROVIDED ABOVE.
+                   - NEVER ask the user: "What is your current attendance?", "What are your subjects?", "What classes do you have tomorrow?", "What is your target threshold?", or "How many classes have you attended?". You already have every single figure. Directly use the numbers from the data snapshot.
+                
+                2. NEVER GUESS, INVENT, OR MAKE ASSUMPTIONS:
+                   - Do NOT invent fake courses, fake timetable slots, fake attendance numbers, or unrecorded events.
+                   - If the user asks about a subject or course code that DOES NOT EXIST in the provided data:
+                     Explicitly tell the student that this subject was not found in their recorded course list (list their actual recorded subjects from the data), and ask the student to clarify the name or add it in the app's Subjects tab.
+                   - If something is missing from the app's records, explicitly ask the user for clarification instead of presuming or guessing.
+                
+                3. STRICT MATHEMATICAL FORMULAS:
+                   - Bunk simulation: If missing k classes with current attended A and conducted C:
+                     Simulated Attendance = (A / (C + k)) * 100%.
+                   - Recovery simulation: If recovering to target threshold T% from shortage (where A/C < T/100):
+                     Consecutive Attendances m = ceil( (T * C - 100 * A) / (100 - T) ).
+                   - Always state exact before-and-after values (e.g. "Software Engineering: 75.0% (15/20) → 71.4% (15/21)").
+                
+                4. SCHEDULE & CALENDAR AWARENESS:
+                   - When asked about "tomorrow" or "today", check the actual scheduled slots and any declared holidays/breaks for that day.
+                   - If a course is NOT scheduled tomorrow, state: "[Subject] is not scheduled tomorrow ([Tomorrow's Day]). Your classes tomorrow are: [list actual classes]."
+                   - If tomorrow is Sunday or a declared holiday/break, inform the student that classes are suspended or not scheduled.
+                
+                5. TONE & FORMAT:
+                   - High-IQ, crisp, highly reliable, and clear.
+                   - Use bold highlights and scannable bullet points for clarity.
+                   - Provide clear GO / SKIP / CAUTION / DANGER recommendations.
             """.trimIndent()
 
             val requestJson = JSONObject().apply {
-                val contents = JSONArray().apply {
-                    val contentObj = JSONObject().apply {
-                        val parts = JSONArray().apply {
-                            put(JSONObject().apply { put("text", "$systemPrompt\n\nStudent Question: $userQuery") })
-                        }
-                        put("parts", parts)
-                    }
-                    put(contentObj)
+                // Official Gemini systemInstruction
+                put("systemInstruction", JSONObject().apply {
+                    put("parts", JSONArray().apply {
+                        put(JSONObject().apply { put("text", systemPrompt) })
+                    })
+                })
+
+                val contents = JSONArray()
+
+                // Include multi-turn conversation history for context
+                val historyTurns = recentMessages.takeLast(8)
+                for (hMsg in historyTurns) {
+                    val role = if (hMsg.sender == "user") "user" else "model"
+                    contents.put(JSONObject().apply {
+                        put("role", role)
+                        put("parts", JSONArray().apply {
+                            put(JSONObject().apply { put("text", hMsg.text) })
+                        })
+                    })
                 }
+
+                // Add current user prompt
+                val currentMsgObj = JSONObject().apply {
+                    put("role", "user")
+                    val parts = JSONArray().apply {
+                        put(JSONObject().apply { put("text", userQuery) })
+                        if (imageBitmap != null) {
+                            val base64Img = bitmapToBase64(imageBitmap)
+                            val inlineData = JSONObject().apply {
+                                put("mimeType", "image/jpeg")
+                                put("data", base64Img)
+                            }
+                            put(JSONObject().apply { put("inlineData", inlineData) })
+                        }
+                    }
+                    put("parts", parts)
+                }
+                contents.put(currentMsgObj)
+
                 put("contents", contents)
+
                 val generationConfig = JSONObject().apply {
-                    put("temperature", 0.4)
-                    put("maxOutputTokens", 800)
+                    put("temperature", 0.2)
+                    put("maxOutputTokens", 1200)
                 }
                 put("generationConfig", generationConfig)
             }
 
             val requestBody = requestJson.toString().toRequestBody(jsonMediaType)
             val request = Request.Builder()
-                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey")
+                .url("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$apiKey")
                 .post(requestBody)
                 .build()
 
-            val response = client.newCall(request).execute()
+            var response = client.newCall(request).execute()
+            
+            // Rate limit (429) or temporary server busy (503) retry
+            if (response.code == 429 || response.code == 503) {
+                kotlinx.coroutines.delay(1200)
+                response = client.newCall(request).execute()
+            }
+
             val responseBody = response.body?.string() ?: ""
 
             if (response.isSuccessful) {
@@ -277,12 +365,12 @@ class GeminiService {
                 val parts = content?.optJSONArray("parts")
                 val text = parts?.optJSONObject(0)?.optString("text")
                 if (!text.isNullOrBlank()) {
-                    return@withContext text
+                    return@withContext Result.success(text)
                 }
             }
-            return@withContext getLocalRuleBasedAdvice(studentContext, userQuery)
+            return@withContext Result.failure(Exception("Gemini response was empty or error ${response.code}"))
         } catch (e: Exception) {
-            return@withContext getLocalRuleBasedAdvice(studentContext, userQuery)
+            return@withContext Result.failure(e)
         }
     }
 
@@ -338,7 +426,7 @@ class GeminiService {
             
             ParsedSubjectSlot("Database Management Systems", "SE-307", 2, "09:00 AM", "10:00 AM", "AB-4 Room 204", "Lecture", "Core"),
             ParsedSubjectSlot("Software Engineering", "SE-301", 2, "10:00 AM", "11:00 AM", "Pragya Bhavan PB-02", "Lecture", "Core"),
-            ParsedSubjectSlot("Economics for Engineers", "HU-301", 2, "11:00 AM", "12:00 PM", "Tw-1 (Tech Wing)", "Lecture", "Elective"),
+            ParsedSubjectSlot("AEC / VAC (Selected)", "VAC-101", 2, "11:00 AM", "12:00 PM", "Tw-1 (Tech Wing)", "Lecture", "VAC"),
             ParsedSubjectSlot("Machine Learning", "SE-303", 2, "01:00 PM", "02:00 PM", "Pragya Bhavan PB-04", "Lecture", "Core"),
 
             ParsedSubjectSlot("Operating Systems", "SE-305", 3, "09:00 AM", "10:00 AM", "SPS-09", "Lecture", "Core"),
@@ -350,40 +438,30 @@ class GeminiService {
             ParsedSubjectSlot("Operating Systems", "SE-305", 4, "11:00 AM", "12:00 PM", "SPS-09", "Lecture", "Core"),
             ParsedSubjectSlot("Database Management Systems", "SE-307", 4, "12:00 PM", "01:00 PM", "AB-4 Room 204", "Lecture", "Core"),
 
-            ParsedSubjectSlot("Economics for Engineers", "HU-301", 5, "10:00 AM", "11:00 AM", "Tw-1 (Tech Wing)", "Lecture", "Elective"),
+            ParsedSubjectSlot("AEC / VAC (Selected)", "VAC-101", 5, "10:00 AM", "11:00 AM", "Tw-1 (Tech Wing)", "Lecture", "VAC"),
             ParsedSubjectSlot("Database Management Systems", "SE-307", 5, "11:00 AM", "12:00 PM", "AB-4 Room 204", "Lecture", "Core"),
             ParsedSubjectSlot("Software Engineering", "SE-301", 5, "02:00 PM", "03:00 PM", "Pragya Bhavan PB-02", "Tutorial", "Core")
         )
     }
 
     private fun getLocalRuleBasedAdvice(studentContext: String, query: String): String {
-        val lower = query.lowercase()
-        return when {
-            lower.contains("bunk today") || lower.contains("skip today") || lower.contains("leave today") -> {
-                "📊 **Daily Bunk Analysis (DTU Intelligence):**\n" +
-                "• **Safe to Skip:** Check your subjects above 85% with available buffer.\n" +
-                "• **DO NOT SKIP:** Any subject below 75% (e.g. DBMS at 70%) or within 1 class of shortage.\n" +
-                "• **Strategy:** If you take today off, ensure you attend the upcoming 2-hour lab in Pragya Bhavan to prevent double penalty."
+        // Extract subjects mentioned in context
+        val lines = studentContext.lines()
+        val subjectLines = lines.filter { it.trim().startsWith("- ") && it.contains("%") }
+
+        return buildString {
+            append("📊 **AttendOS Intelligence (Live Ground-Truth Response)**\n\n")
+            append("I have analyzed your real-time academic records:\n")
+            if (subjectLines.isNotEmpty()) {
+                subjectLines.take(6).forEach { line ->
+                    append("• ${line.removePrefix("- ").trim()}\n")
+                }
+            } else {
+                append("• All courses require strictly >=75% for exam hall ticket clearance.\n")
             }
-            lower.contains("which day") || lower.contains("leave") || lower.contains("best day") -> {
-                "🗓️ **Optimal Leave Day Recommendation:**\n" +
-                "• **Best Day for Leave: Friday** (Only 3 hours of lectures: Economics & DBMS, low lab impact).\n" +
-                "• **Worst Day to Bunk: Monday & Wednesday** (Includes heavy 2-hour Practical Labs in AB-4 & Pragya Bhavan PB-302).\n" +
-                "• **Tip:** Always reserve your 3 emergency leave tokens for midsem revision week."
-            }
-            lower.contains("endsem") || lower.contains("midsem") || lower.contains("exam") -> {
-                "🎯 **Exam Attendance Recovery Roadmap:**\n" +
-                "• **DBMS (70.0%):** Attend next 4 consecutive classes to cross the 75.0% threshold safely.\n" +
-                "• **Operating Systems (72.0%):** Needs 3 consecutive attendances to exit detention risk.\n" +
-                "• **Software Eng & ML (>80%):** Full exam clearance secured! Keep maintaining 1 attendance per week minimum."
-            }
-            else -> {
-                "✨ **Draco Intelligence:**\n" +
-                "Based on your current real-time data:\n" +
-                "• All Core courses require strictly >=75% for Endsem hall ticket generation.\n" +
-                "• With your emergency buffer enabled, always prioritize high-weightage labs.\n" +
-                "• Feel free to ask: *'Can I bunk DBMS?'*, *'How many classes to reach 85% in SE?'*, or *'Analyze my Friday schedule'*."
-            }
+            append("\n💡 **Actionable Advice:**\n")
+            append("• All data is synced with your on-device SQLite database.\n")
+            append("• To check a specific subject, ask: *'Can I skip [Subject Name] tomorrow?'* or *'How many classes to reach 75%?'*")
         }
     }
 }

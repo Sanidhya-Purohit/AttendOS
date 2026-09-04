@@ -41,14 +41,4 @@ Built on a zero-knowledge, privacy-first mobile architecture keeping all academi
 
 ---
 
-### 👥 Team: Day One Devs
-
-| Name | Role |
-| :--- | :--- |
-| **Sanidhya Purohit** | Team Leader, Lead Developer & Product Architect |
-| **Atishay Jain** | Project Coordinator & Presentation Framework |
-| **Harsh Bindal** | Quality Assurance (QA) Testing |
-| **Vridhi Gupta** | Pitch Delivery & UI Support |
-
----
 

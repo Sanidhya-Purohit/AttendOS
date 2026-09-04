@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.local.entity.AcademicBreakEntity
+import com.example.ui.components.AttendOSDateSelectorCard
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.AttendanceViewModel
 import java.text.SimpleDateFormat
@@ -412,35 +413,25 @@ fun AddBreakDialog(
                     )
                 }
 
-                // Date Pickers Row
+                // Date Pickers Row (Calendar-based Selection)
                 item {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        OutlinedTextField(
-                            value = startDate,
-                            onValueChange = { startDate = it },
-                            label = { Text("Start (YYYY-MM-DD)") },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = NeonCyan,
-                                unfocusedBorderColor = DarkBorder,
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary
-                            ),
+                        AttendOSDateSelectorCard(
+                            label = "Start Date",
+                            selectedDate = startDate,
+                            onDateSelected = { startDate = it },
+                            pickerTitle = "Select Break Start Date",
                             modifier = Modifier.weight(1f)
                         )
 
-                        OutlinedTextField(
-                            value = endDate,
-                            onValueChange = { endDate = it },
-                            label = { Text("End (YYYY-MM-DD)") },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = NeonCyan,
-                                unfocusedBorderColor = DarkBorder,
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary
-                            ),
+                        AttendOSDateSelectorCard(
+                            label = "End Date",
+                            selectedDate = endDate,
+                            onDateSelected = { endDate = it },
+                            pickerTitle = "Select Break End Date",
                             modifier = Modifier.weight(1f)
                         )
                     }

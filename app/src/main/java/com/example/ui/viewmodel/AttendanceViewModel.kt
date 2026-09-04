@@ -1,27 +1,37 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
 import android.graphics.Bitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.ai.ChatConversation
 import com.example.data.ai.ChatMessage
 import com.example.data.ai.GeminiService
+import com.example.data.ai.LocalAttendanceAdvisor
 import com.example.data.ai.ParsedSubjectSlot
 import com.example.data.local.AppDatabase
 import com.example.data.local.dao.SlotWithSubject
 import com.example.data.local.entity.AcademicBreakEntity
 import com.example.data.local.entity.AttendanceRecordEntity
 import com.example.data.local.entity.ScheduleSlotEntity
+import com.example.data.local.entity.SemesterEntity
 import com.example.data.local.entity.SubjectEntity
 import com.example.data.local.entity.UserProfileEntity
 import com.example.data.repository.AttendanceRepository
+import com.example.data.repository.DayAttendanceRecordUpdate
 import com.example.domain.AttendanceCalculator
 import com.example.domain.CalculationTimeframe
 import com.example.domain.SubjectStats
 import com.example.util.AlarmSchedulerHelper
+import com.example.util.ExportBackupManager
 import com.example.util.NotificationHelper
+import com.example.util.RestoreResult
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -50,7 +60,9 @@ data class ProjectedSubjectOutcome(
     val remainingClassesEstimate: Int,
     val ifAttendAllPercentage: Double,
     val ifAttend75Percentage: Double,
-    val isRecoverableBeforeExam: Boolean
+    val isRecoverableBeforeExam: Boolean,
+    val classesToReachTarget: Int = 0,
+    val safeBunkCapacity: Int = 0
 )
 
 data class InAppNotification(
@@ -64,6 +76,20 @@ data class InAppNotification(
 class AttendanceViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = AttendanceRepository(AppDatabase.getDatabase(application))
     private val geminiService = GeminiService()
+
+    private val prefs = application.getSharedPreferences("attendos_prefs", Context.MODE_PRIVATE)
+    private val _themeMode = MutableStateFlow(prefs.getString("theme_mode", "DARK") ?: "DARK")
+    val themeMode: StateFlow<String> = _themeMode.asStateFlow()
+
+    fun setThemeMode(mode: String) {
+        _themeMode.value = mode
+        prefs.edit().putString("theme_mode", mode).apply()
+    }
+
+    fun toggleTheme() {
+        val next = if (_themeMode.value == "LIGHT") "DARK" else "LIGHT"
+        setThemeMode(next)
+    }
 
     val allSubjects: StateFlow<List<SubjectEntity>> = repository.allSubjects
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -82,6 +108,16 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
 
     val allBreaks: StateFlow<List<AcademicBreakEntity>> = repository.allBreaks
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val allSemesters: StateFlow<List<SemesterEntity>> = repository.allSemesters
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val currentSemester: StateFlow<SemesterEntity?> = repository.currentSemester
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val isCurrentSemesterLocked: StateFlow<Boolean> = repository.currentSemester
+        .map { it?.isLocked == true }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     val activeBreakToday: StateFlow<AcademicBreakEntity?> = allBreaks.map { breaks ->
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
@@ -144,15 +180,14 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 100.0)
 
-    // AI Chat Messages
-    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(
-        listOf(
-            ChatMessage(
-                sender = "ai",
-                text = "✨ Hey there! I'm **AttendOS AI**, your intelligent attendance strategist.\n\nAsk me anything about your schedule, bunk margins, or exam criteria:\n• *'Can I safely bunk DBMS today?'*\n• *'Which day is optimal for a leave this week?'*\n• *'Calculate my Midsem 75% cutoff targets.'*"
-            )
-        )
-    )
+    // AI Chat Conversations & Multiple Chats
+    private val _conversations = MutableStateFlow<List<ChatConversation>>(emptyList())
+    val conversations: StateFlow<List<ChatConversation>> = _conversations.asStateFlow()
+
+    private val _activeConversationId = MutableStateFlow<String>("")
+    val activeConversationId: StateFlow<String> = _activeConversationId.asStateFlow()
+
+    private val _chatMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val chatMessages: StateFlow<List<ChatMessage>> = _chatMessages.asStateFlow()
     val isChatLoading = MutableStateFlow(false)
 
@@ -165,6 +200,7 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
     val notifications: StateFlow<List<InAppNotification>> = _notifications.asStateFlow()
 
     init {
+        loadConversationsFromDisk()
         viewModelScope.launch {
             repository.checkAndInitializeDefaultDTUData()
             generateMockClassRemindersAndAlerts()
@@ -587,34 +623,386 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun sendChatMessage(query: String) {
-        if (query.isBlank()) return
-        val userMsg = ChatMessage(sender = "user", text = query)
-        _chatMessages.value = _chatMessages.value + userMsg
+        sendMultimodalChatMessage(query, null)
+    }
+
+    fun sendMultimodalChatMessage(query: String, imageBitmap: Bitmap? = null) {
+        if (query.isBlank() && imageBitmap == null) return
+        val userMsg = ChatMessage(sender = "user", text = query, imageBitmap = imageBitmap)
+        
+        var currentActiveId = _activeConversationId.value
+        if (currentActiveId.isBlank() || _conversations.value.none { it.id == currentActiveId }) {
+            val newId = java.util.UUID.randomUUID().toString()
+            val newConv = ChatConversation(
+                id = newId,
+                title = query.take(28).ifBlank { "Schedule Query" },
+                messages = emptyList()
+            )
+            _conversations.value = listOf(newConv) + _conversations.value
+            _activeConversationId.value = newId
+            currentActiveId = newId
+        }
+
+        val updatedMessages = _chatMessages.value + userMsg
+        _chatMessages.value = updatedMessages
+
+        val currentConv = _conversations.value.find { it.id == currentActiveId }
+        val isFirstUserMsg = currentConv?.messages?.none { it.sender == "user" } ?: true
+        val autoTitle = if (isFirstUserMsg && query.isNotBlank()) {
+            val clean = query.trim().replace("\n", " ")
+            if (clean.length > 26) clean.take(26) + "..." else clean
+        } else currentConv?.title ?: "Chat"
+
+        _conversations.value = _conversations.value.map { conv ->
+            if (conv.id == currentActiveId) {
+                conv.copy(
+                    title = if (conv.title == "New chat" || conv.title == "New conversation") autoTitle else conv.title,
+                    messages = updatedMessages,
+                    updatedAt = System.currentTimeMillis()
+                )
+            } else conv
+        }
+        saveConversationsToDisk()
+
         isChatLoading.value = true
 
         viewModelScope.launch {
             val contextSummary = buildStudentContextSummary()
-            val aiResponseText = geminiService.askAttendanceAdvisor(contextSummary, query)
-            _chatMessages.value = _chatMessages.value + ChatMessage(sender = "ai", text = aiResponseText)
+            val recentMsgs = updatedMessages.dropLast(1).takeLast(8)
+            val result = geminiService.askAttendanceAdvisorMultimodal(
+                studentContext = contextSummary,
+                userQuery = query,
+                imageBitmap = imageBitmap,
+                recentMessages = recentMsgs
+            )
+            val aiResponseText = if (result.isSuccess && result.getOrNull()?.isNotBlank() == true) {
+                result.getOrNull()!!
+            } else {
+                LocalAttendanceAdvisor.generateAdvice(
+                    query = query,
+                    stats = subjectStatsList.value,
+                    slots = allSlotsWithSubjects.value,
+                    profile = userProfile.value,
+                    breaks = allBreaks.value,
+                    records = allAttendanceRecords.value,
+                    currentSemester = currentSemester.value,
+                    leaveScores = getLeaveDayScores()
+                )
+            }
+            val aiMsg = ChatMessage(sender = "ai", text = aiResponseText)
+            val finalMessages = _chatMessages.value + aiMsg
+            _chatMessages.value = finalMessages
+
+            _conversations.value = _conversations.value.map { conv ->
+                if (conv.id == currentActiveId) {
+                    conv.copy(messages = finalMessages, updatedAt = System.currentTimeMillis())
+                } else conv
+            }
             isChatLoading.value = false
+            saveConversationsToDisk()
         }
+    }
+
+    fun createNewSemester(
+        semesterNumber: Int,
+        title: String,
+        academicYear: String = "2026-2027",
+        startDate: String,
+        endDate: String,
+        lockPrevious: Boolean = true,
+        onComplete: (Long) -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            val newId = repository.createNewSemester(
+                semesterNumber = semesterNumber,
+                title = title,
+                academicYear = academicYear,
+                startDate = startDate,
+                endDate = endDate,
+                lockCurrent = lockPrevious
+            )
+            onComplete(newId)
+        }
+    }
+
+    fun lockCurrentSemester(onComplete: () -> Unit = {}) {
+        viewModelScope.launch {
+            repository.lockCurrentSemester()
+            onComplete()
+        }
+    }
+
+    fun unlockSemester(semesterId: Long) {
+        viewModelScope.launch {
+            repository.unlockSemester(semesterId)
+        }
+    }
+
+    fun switchCurrentSemester(semesterId: Long) {
+        viewModelScope.launch {
+            repository.switchCurrentSemester(semesterId)
+        }
+    }
+
+    fun batchUpdateDayAttendance(
+        date: String,
+        updates: List<DayAttendanceRecordUpdate>,
+        onComplete: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            repository.batchUpdateDayAttendance(date, updates)
+            onComplete()
+        }
+    }
+
+    fun markDayAsHoliday(date: String, holidayTitle: String = "College Holiday") {
+        viewModelScope.launch {
+            repository.markDayAsHoliday(date, holidayTitle)
+        }
+    }
+
+    fun exportPdfReport(context: Context) {
+        viewModelScope.launch {
+            val subjects = repository.allSubjects.firstOrNull() ?: emptyList()
+            val records = repository.recentRecords.firstOrNull() ?: emptyList()
+            val profile = repository.userProfile.firstOrNull()
+            val currentSem = repository.currentSemester.firstOrNull()
+            ExportBackupManager.generateAndSharePdfReport(
+                context = context,
+                subjects = subjects,
+                records = records,
+                profile = profile,
+                semester = currentSem
+            )
+        }
+    }
+
+    fun exportCsvSheet(context: Context) {
+        viewModelScope.launch {
+            val subjects = repository.allSubjects.firstOrNull() ?: emptyList()
+            val records = repository.recentRecords.firstOrNull() ?: emptyList()
+            ExportBackupManager.generateAndShareAttendanceCsv(
+                context = context,
+                subjects = subjects,
+                records = records
+            )
+        }
+    }
+
+    fun exportFullBackup(context: Context) {
+        viewModelScope.launch {
+            ExportBackupManager.exportAndShareFullBackupJson(
+                context = context,
+                database = AppDatabase.getDatabase(context)
+            )
+        }
+    }
+
+    fun restoreFromBackup(
+        context: Context,
+        jsonString: String,
+        onResult: (RestoreResult) -> Unit
+    ) {
+        viewModelScope.launch {
+            val result = ExportBackupManager.restoreFromBackupJson(
+                context = context,
+                database = AppDatabase.getDatabase(context),
+                jsonContent = jsonString
+            )
+            onResult(result)
+        }
+    }
+
+    fun startNewChat() {
+        val newId = java.util.UUID.randomUUID().toString()
+        val initialMsg = ChatMessage(
+            sender = "ai",
+            text = "Hello! I am your Attend AI academic strategist. How can I help you optimize your schedule, calculate bunk targets, or check exam clearances today?"
+        )
+        val newConv = ChatConversation(
+            id = newId,
+            title = "New conversation",
+            messages = listOf(initialMsg),
+            createdAt = System.currentTimeMillis(),
+            updatedAt = System.currentTimeMillis()
+        )
+        _conversations.value = listOf(newConv) + _conversations.value
+        _activeConversationId.value = newId
+        _chatMessages.value = newConv.messages
+        saveConversationsToDisk()
+    }
+
+    fun selectConversation(conversationId: String) {
+        val conv = _conversations.value.find { it.id == conversationId }
+        if (conv != null) {
+            _activeConversationId.value = conv.id
+            _chatMessages.value = conv.messages
+        }
+    }
+
+    fun deleteConversation(conversationId: String) {
+        val updated = _conversations.value.filter { it.id != conversationId }
+        _conversations.value = updated
+        if (_activeConversationId.value == conversationId) {
+            if (updated.isNotEmpty()) {
+                val next = updated.first()
+                _activeConversationId.value = next.id
+                _chatMessages.value = next.messages
+            } else {
+                startNewChat()
+            }
+        }
+        saveConversationsToDisk()
+    }
+
+    fun renameConversation(conversationId: String, newTitle: String) {
+        if (newTitle.isBlank()) return
+        _conversations.value = _conversations.value.map {
+            if (it.id == conversationId) it.copy(title = newTitle.trim()) else it
+        }
+        saveConversationsToDisk()
+    }
+
+    fun toggleMessageLike(messageId: String, liked: Boolean) {
+        val activeId = _activeConversationId.value
+        _chatMessages.value = _chatMessages.value.map { msg ->
+            if (msg.id == messageId) {
+                val newLiked = if (msg.isLiked == liked) null else liked
+                msg.copy(isLiked = newLiked)
+            } else msg
+        }
+        _conversations.value = _conversations.value.map { conv ->
+            if (conv.id == activeId) conv.copy(messages = _chatMessages.value) else conv
+        }
+        saveConversationsToDisk()
     }
 
     fun clearChatMessages() {
         _chatMessages.value = emptyList()
+        val activeId = _activeConversationId.value
+        _conversations.value = _conversations.value.map { conv ->
+            if (conv.id == activeId) conv.copy(messages = emptyList()) else conv
+        }
+        saveConversationsToDisk()
     }
 
     fun retryLastChatMessage() {
         val lastUserMsg = _chatMessages.value.lastOrNull { it.sender == "user" }
         if (lastUserMsg != null) {
+            val activeId = _activeConversationId.value
             isChatLoading.value = true
             viewModelScope.launch {
                 val contextSummary = buildStudentContextSummary()
-                val aiResponseText = geminiService.askAttendanceAdvisor(contextSummary, lastUserMsg.text)
-                _chatMessages.value = _chatMessages.value + ChatMessage(sender = "ai", text = aiResponseText)
+                val recentMsgs = _chatMessages.value.filter { it.id != lastUserMsg.id }.takeLast(8)
+                val result = geminiService.askAttendanceAdvisorMultimodal(
+                    studentContext = contextSummary,
+                    userQuery = lastUserMsg.text,
+                    imageBitmap = lastUserMsg.imageBitmap,
+                    recentMessages = recentMsgs
+                )
+                val aiResponseText = if (result.isSuccess && result.getOrNull()?.isNotBlank() == true) {
+                    result.getOrNull()!!
+                } else {
+                    LocalAttendanceAdvisor.generateAdvice(
+                        query = lastUserMsg.text,
+                        stats = subjectStatsList.value,
+                        slots = allSlotsWithSubjects.value,
+                        profile = userProfile.value,
+                        breaks = allBreaks.value,
+                        records = allAttendanceRecords.value,
+                        currentSemester = currentSemester.value,
+                        leaveScores = getLeaveDayScores()
+                    )
+                }
+                val newMsgs = _chatMessages.value + ChatMessage(sender = "ai", text = aiResponseText)
+                _chatMessages.value = newMsgs
+                _conversations.value = _conversations.value.map { conv ->
+                    if (conv.id == activeId) conv.copy(messages = newMsgs, updatedAt = System.currentTimeMillis()) else conv
+                }
                 isChatLoading.value = false
+                saveConversationsToDisk()
             }
         }
+    }
+
+    private fun saveConversationsToDisk() {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val file = java.io.File(getApplication<Application>().filesDir, "gemini_conversations.json")
+                val array = JSONArray()
+                for (conv in _conversations.value) {
+                    val convObj = JSONObject().apply {
+                        put("id", conv.id)
+                        put("title", conv.title)
+                        put("createdAt", conv.createdAt)
+                        put("updatedAt", conv.updatedAt)
+                        val msgsArray = JSONArray()
+                        for (m in conv.messages) {
+                            val mObj = JSONObject().apply {
+                                put("id", m.id)
+                                put("sender", m.sender)
+                                put("text", m.text)
+                                put("timestamp", m.timestamp)
+                                m.isLiked?.let { put("isLiked", it) }
+                            }
+                            msgsArray.put(mObj)
+                        }
+                        put("messages", msgsArray)
+                    }
+                    array.put(convObj)
+                }
+                file.writeText(array.toString())
+            } catch (e: Exception) {
+                // non-fatal
+            }
+        }
+    }
+
+    private fun loadConversationsFromDisk() {
+        try {
+            val file = java.io.File(getApplication<Application>().filesDir, "gemini_conversations.json")
+            if (file.exists()) {
+                val text = file.readText()
+                val array = JSONArray(text)
+                val loadedConvs = mutableListOf<ChatConversation>()
+                for (i in 0 until array.length()) {
+                    val cObj = array.getJSONObject(i)
+                    val mArray = cObj.optJSONArray("messages") ?: JSONArray()
+                    val msgs = mutableListOf<ChatMessage>()
+                    for (j in 0 until mArray.length()) {
+                        val mObj = mArray.getJSONObject(j)
+                        val isLikedVal = if (mObj.has("isLiked")) mObj.getBoolean("isLiked") else null
+                        msgs.add(
+                            ChatMessage(
+                                id = mObj.optString("id", java.util.UUID.randomUUID().toString()),
+                                sender = mObj.optString("sender", "ai"),
+                                text = mObj.optString("text", ""),
+                                timestamp = mObj.optLong("timestamp", System.currentTimeMillis()),
+                                isLiked = isLikedVal
+                            )
+                        )
+                    }
+                    loadedConvs.add(
+                        ChatConversation(
+                            id = cObj.optString("id", java.util.UUID.randomUUID().toString()),
+                            title = cObj.optString("title", "Chat"),
+                            messages = msgs,
+                            createdAt = cObj.optLong("createdAt", System.currentTimeMillis()),
+                            updatedAt = cObj.optLong("updatedAt", System.currentTimeMillis())
+                        )
+                    )
+                }
+                if (loadedConvs.isNotEmpty()) {
+                    _conversations.value = loadedConvs
+                    _activeConversationId.value = loadedConvs.first().id
+                    _chatMessages.value = loadedConvs.first().messages
+                    return
+                }
+            }
+        } catch (e: Exception) {
+            // fallback
+        }
+        startNewChat()
     }
 
 
@@ -628,6 +1016,9 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         val slots = allSlotsWithSubjects.value
         val attendanceRecords = allAttendanceRecords.value
         val breaks = allBreaks.value
+        val currentSem = currentSemester.value
+        val allSems = allSemesters.value
+        val leaveScores = getLeaveDayScores()
 
         val leadDays = profile?.examCutoffLeadDays ?: 2
         val calcMode = CalculationTimeframe.fromId(profile?.calculationMode)
@@ -637,55 +1028,129 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
         val dateFormatter = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US)
         val timeFormatter = java.text.SimpleDateFormat("hh:mm a", Locale.US)
         val daysOfWeekFull = listOf("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
-        val currentDayName = daysOfWeekFull[currentTime.get(java.util.Calendar.DAY_OF_WEEK) - 1]
+        val currentDayOfWeek = currentTime.get(java.util.Calendar.DAY_OF_WEEK)
+        val currentDayName = daysOfWeekFull[currentDayOfWeek - 1]
         
-        sb.append("CURRENT REAL-TIME:\n")
-        sb.append("Date: ${dateFormatter.format(currentTime.time)} ($currentDayName)\n")
-        sb.append("Time: ${timeFormatter.format(currentTime.time)}\n\n")
+        // 1-indexed (1=Monday ... 6=Saturday, 7=Sunday)
+        val appDayOfWeek = when (currentDayOfWeek) {
+            java.util.Calendar.MONDAY -> 1
+            java.util.Calendar.TUESDAY -> 2
+            java.util.Calendar.WEDNESDAY -> 3
+            java.util.Calendar.THURSDAY -> 4
+            java.util.Calendar.FRIDAY -> 5
+            java.util.Calendar.SATURDAY -> 6
+            else -> 7
+        }
+        val tomorrowAppDay = if (appDayOfWeek == 7) 1 else appDayOfWeek + 1
+        val daysOfWeekShort = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+        val tomorrowDayName = daysOfWeekShort[tomorrowAppDay - 1]
 
-        sb.append("Student: ${profile?.studentName ?: "DTU Student"} (${profile?.branch ?: "SE"})\n")
-        sb.append("Global Threshold: ${profile?.globalThreshold ?: 75.0}%\n")
-        sb.append("Emergency Leave Buffer: ${profile?.globalEmergencyBuffer ?: 3} classes (Active: ${profile?.includeBufferInCalculations})\n")
-        sb.append("Current Calculation Mode: ${calcMode.title} (Cutoff is $leadDays days before exam date)\n")
+        val totalConducted = stats.sumOf { it.subject.conductedClasses }
+        val totalAttended = stats.sumOf { it.subject.attendedClasses }
+        val overallPct = if (totalConducted > 0) (totalAttended.toDouble() / totalConducted.toDouble()) * 100.0 else 100.0
+        val targetThreshold = profile?.globalThreshold ?: 75.0
+
+        sb.append("CURRENT SYSTEM REAL-TIME CLOCK:\n")
+        sb.append("Today's Date: ${dateFormatter.format(currentTime.time)} ($currentDayName)\n")
+        sb.append("Current Time: ${timeFormatter.format(currentTime.time)}\n")
+        sb.append("Tomorrow is: $tomorrowDayName\n\n")
+
+        sb.append("STUDENT PROFILE & ACADEMIC CONFIG:\n")
+        sb.append("Student Name: ${profile?.studentName ?: "Student"}\n")
+        sb.append("Roll Number: ${profile?.rollNumber ?: "N/A"}\n")
+        sb.append("College / University: ${profile?.college ?: "DTU"}\n")
+        sb.append("Branch & Semester: ${profile?.branch ?: "Engineering"} (Semester ${profile?.semester ?: 5})\n")
+        sb.append("Active Semester: ${currentSem?.title ?: "Current Semester"} [${currentSem?.academicYear ?: "2026-2027"}] (Start: ${currentSem?.startDate ?: "2026-08-01"} to End: ${currentSem?.endDate ?: "2026-12-15"})\n")
+        sb.append("Global Mandatory Threshold: ${targetThreshold}%\n")
+        sb.append("Emergency Leave Buffer: ${profile?.globalEmergencyBuffer ?: 3} classes (Included in math: ${profile?.includeBufferInCalculations})\n")
+        sb.append("Calculation Mode: ${calcMode.title} (Cutoff is $leadDays days before exam)\n")
         sb.append("Midsem Date: ${profile?.midsemDate ?: "2026-10-15"}, Endsem Date: ${profile?.endsemDate ?: "2026-12-08"}\n")
-        sb.append("Alarm Settings: Enabled=${profile?.alarmEnabled}, Mode=${profile?.alarmMode}, LeadHours=${profile?.alarmLeadHours}\n\n")
-        
-        sb.append("SUBJECT WISE STANDING & MILESTONE ELIGIBILITY:\n")
-        stats.forEach { s ->
-            sb.append("- ${s.subject.name} (${s.subject.code}): ${String.format(Locale.US, "%.1f", s.percentage)}% [${s.subject.attendedClasses}/${s.subject.conductedClasses}]. Tier: ${s.tier.levelName}. Safe Bunk Till Cutoff (${s.cutoffDateStr}): ${s.safeBunkWithBuffer} classes. Remaining classes in window: ${s.remainingClassesInWindow}. Must attend: ${s.classesToReachTarget}. Room: ${s.subject.defaultRoom}\n")
+        sb.append("Attendance Streak: ${profile?.currentStreak ?: 0} days (Longest: ${profile?.longestStreak ?: 0} days)\n")
+        sb.append("Overall Attendance: ${String.format(Locale.US, "%.1f", overallPct)}% ($totalAttended / $totalConducted attended)\n\n")
+
+        sb.append("TODAY'S SCHEDULE ($currentDayName):\n")
+        if (appDayOfWeek == 7) {
+            sb.append("- Sunday: No classes scheduled.\n")
+        } else {
+            val todaySlots = slots.filter { it.slot.dayOfWeek == appDayOfWeek }.sortedBy { it.slot.startTime }
+            if (todaySlots.isEmpty()) {
+                sb.append("- No classes scheduled today.\n")
+            } else {
+                todaySlots.forEach { s ->
+                    val stat = stats.find { it.subject.id == s.subject.id }
+                    val curPct = stat?.let { String.format(Locale.US, "%.1f", it.percentage) } ?: "N/A"
+                    val safeBunk = stat?.rawBunkCapacity ?: 0
+                    sb.append("- ${s.slot.startTime} to ${s.slot.endTime}: ${s.subject.name} (${s.subject.code}) [${s.slot.slotType}] at ${s.slot.location} | Current: $curPct% (Safe bunks: $safeBunk)\n")
+                }
+            }
         }
 
-        sb.append("\nCOMPLETE WEEKLY TIMETABLE SCHEDULE:\n")
+        sb.append("\nTOMORROW'S SCHEDULE ($tomorrowDayName):\n")
+        if (tomorrowAppDay == 7) {
+            sb.append("- Sunday: No classes scheduled.\n")
+        } else {
+            val tomorrowSlots = slots.filter { it.slot.dayOfWeek == tomorrowAppDay }.sortedBy { it.slot.startTime }
+            if (tomorrowSlots.isEmpty()) {
+                sb.append("- No classes scheduled tomorrow.\n")
+            } else {
+                tomorrowSlots.forEach { s ->
+                    val stat = stats.find { it.subject.id == s.subject.id }
+                    val curPct = stat?.let { String.format(Locale.US, "%.1f", it.percentage) } ?: "N/A"
+                    val safeBunk = stat?.rawBunkCapacity ?: 0
+                    sb.append("- ${s.slot.startTime} to ${s.slot.endTime}: ${s.subject.name} (${s.subject.code}) [${s.slot.slotType}] at ${s.slot.location} | Current: $curPct% (Safe bunks: $safeBunk)\n")
+                }
+            }
+        }
+
+        sb.append("\nALL REGISTERED SUBJECTS & LIVE MATHEMATICAL STATS:\n")
+        if (stats.isEmpty()) {
+            sb.append("- No subjects currently registered.\n")
+        } else {
+            stats.forEach { s ->
+                val deficit = if (s.percentage < targetThreshold) " [SHORTAGE DEFICIT: Needs ${s.classesToReachTarget} consecutive attendances]" else ""
+                sb.append("- ${s.subject.name} (${s.subject.code}): ${String.format(Locale.US, "%.1f", s.percentage)}% [Attended: ${s.subject.attendedClasses}, Conducted: ${s.subject.conductedClasses}, Missed: ${s.subject.conductedClasses - s.subject.attendedClasses}]. Tier: ${s.tier.levelName}. Safe Bunk (Target ${targetThreshold.toInt()}%): ${s.rawBunkCapacity} classes. Safe Bunk (With Buffer): ${s.safeBunkWithBuffer} classes. Remaining in window: ${s.remainingClassesInWindow}. Room: ${s.subject.defaultRoom}. Category: ${s.subject.category}, Credits: ${s.subject.credits}$deficit\n")
+            }
+        }
+
+        sb.append("\nCOMPLETE WEEKLY TIMETABLE SCHEDULE (ALL DAYS):\n")
         val daysOfWeek = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
         for (day in 1..6) {
             val daySlots = slots.filter { it.slot.dayOfWeek == day }.sortedBy { it.slot.startTime }
             if (daySlots.isNotEmpty()) {
                 sb.append("${daysOfWeek[day - 1]}:\n")
                 daySlots.forEach {
-                    sb.append("  - ${it.slot.startTime} to ${it.slot.endTime}: ${it.subject.name} (${it.slot.slotType}) at ${it.slot.location}\n")
+                    sb.append("  - ${it.slot.startTime} to ${it.slot.endTime}: ${it.subject.name} (${it.subject.code}) [${it.slot.slotType}] at ${it.slot.location}\n")
                 }
+            } else {
+                sb.append("${daysOfWeek[day - 1]}: Free day (no classes)\n")
             }
         }
 
-        sb.append("\nRECENT ABSENT DATES & BUNK HISTORY:\n")
-        val absentRecords = attendanceRecords.filter { it.status.equals("ABSENT", ignoreCase = true) }
-            .sortedByDescending { it.date }
-            .take(15) // take the last 15 absences to avoid context overflow
-        if (absentRecords.isEmpty()) {
-            sb.append("- No recent absences recorded.\n")
-        } else {
-            absentRecords.forEach { rec ->
-                val subjectName = stats.find { it.subject.id == rec.subjectId }?.subject?.name ?: "Unknown"
-                sb.append("  - Missed ${subjectName} on ${rec.date} (${rec.slotTime})\n")
-            }
+        sb.append("\nLEAVE PLANNING & DAY SAFETY RATINGS:\n")
+        leaveScores.forEach { ls ->
+            val emoji = if (ls.safetyScore >= 75) "🟢" else if (ls.safetyScore >= 50) "🟡" else "🔴"
+            sb.append("- $emoji ${ls.dayName}: Safety Score ${ls.safetyScore}/100 (${ls.totalSlots} classes). ${ls.recommendation}\n")
         }
 
-        sb.append("\nACADEMIC BREAKS / HOLIDAYS:\n")
+        sb.append("\nACADEMIC BREAKS / CAMPUS HOLIDAYS:\n")
         if (breaks.isEmpty()) {
-            sb.append("- No holidays recorded.\n")
+            sb.append("- No breaks recorded.\n")
         } else {
             breaks.forEach { b ->
-                sb.append("  - ${b.title}: from ${b.startDate} to ${b.endDate}\n")
+                sb.append("- ${b.title} [${b.category}]: ${b.startDate} to ${b.endDate} (${b.description})\n")
+            }
+        }
+
+        sb.append("\nRECENT ABSENCE AUDIT (LAST 15 ABSENCES):\n")
+        val absentRecords = attendanceRecords.filter { it.status.equals("ABSENT", ignoreCase = true) }
+            .sortedByDescending { it.date }
+            .take(15)
+        if (absentRecords.isEmpty()) {
+            sb.append("- No recent absences recorded in history.\n")
+        } else {
+            absentRecords.forEach { rec ->
+                val subjectName = stats.find { it.subject.id == rec.subjectId }?.subject?.name ?: "Subject #${rec.subjectId}"
+                sb.append("  - Missed $subjectName on ${rec.date} (${rec.slotTime})\n")
             }
         }
 
@@ -759,7 +1224,9 @@ class AttendanceViewModel(application: Application) : AndroidViewModel(applicati
                 remainingClassesEstimate = remainingClasses,
                 ifAttendAllPercentage = attendAll,
                 ifAttend75Percentage = attend75Pct,
-                isRecoverableBeforeExam = attendAll >= (profile?.globalThreshold ?: 75.0)
+                isRecoverableBeforeExam = attendAll >= (profile?.globalThreshold ?: 75.0),
+                classesToReachTarget = stat.classesToReachTarget,
+                safeBunkCapacity = stat.safeBunkWithBuffer
             )
         }
 

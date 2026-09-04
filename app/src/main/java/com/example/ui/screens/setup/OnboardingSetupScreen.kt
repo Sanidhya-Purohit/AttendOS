@@ -17,9 +17,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -42,6 +45,8 @@ import com.example.data.local.entity.UserProfileEntity
 import com.example.domain.AttendanceCalculator
 import com.example.ui.screens.timetable.ManualClassesPhase
 import com.example.ui.screens.timetable.ManualCoursesPhase
+import com.example.ui.components.AttendOSDatePickerDialog
+import com.example.ui.components.AttendOSDateSelectorCard
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.AttendanceViewModel
 import com.example.util.FileUtils
@@ -592,11 +597,11 @@ private fun UploadScheduleStep(
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier.fillMaxWidth().height(50.dp).testTag("btn_upload_image")
                         ) {
-                            Icon(Icons.Default.Image, contentDescription = null, tint = DarkBackground)
+                            Icon(Icons.Default.Image, contentDescription = null, tint = ButtonTextOnPrimary)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = "Upload Timetable Image (JPG / PNG)",
-                                color = DarkBackground,
+                                color = ButtonTextOnPrimary,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 14.sp
                             )
@@ -716,7 +721,7 @@ private fun UploadScheduleStep(
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
                         ) {
-                            Text("Extract with AI", color = DarkBackground, fontWeight = FontWeight.Bold)
+                            Text("Extract with AI", color = ButtonTextOnPrimary, fontWeight = FontWeight.Bold)
                         }
                     },
                     dismissButton = {
@@ -971,10 +976,32 @@ private fun ReviewAndEditScheduleStep(
                                         }
                                     }
                                 }
+                                val subjectDays = slots.filter { it.first == index }
+                                    .map { slot ->
+                                        when (slot.second.dayOfWeek) {
+                                            1 -> "Mon"
+                                            2 -> "Tue"
+                                            3 -> "Wed"
+                                            4 -> "Thu"
+                                            5 -> "Fri"
+                                            6 -> "Sat"
+                                            else -> ""
+                                        }
+                                    }
+                                    .filter { it.isNotBlank() }
+                                    .distinct()
+                                val daysText = if (subjectDays.isNotEmpty()) "Days: ${subjectDays.joinToString(", ")}" else "⚠️ No weekly days set"
+
                                 Text(
-                                    text = "${sub.code} • ${sub.credits} Credits • ${sub.defaultRoom} • $subSlotsCount slots/wk",
+                                    text = "${sub.code} • ${sub.credits} Credits • ${sub.defaultRoom}",
                                     color = TextMuted,
                                     fontSize = 11.sp
+                                )
+                                Text(
+                                    text = "$daysText ($subSlotsCount slots/wk)",
+                                    color = if (subSlotsCount > 0) NeonCyan else NeonAmber,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (subSlotsCount == 0) FontWeight.Bold else FontWeight.Normal
                                 )
                             }
 
@@ -1049,7 +1076,7 @@ private fun ReviewAndEditScheduleStep(
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.weight(2f).height(48.dp).testTag("btn_proceed_to_attendance")
             ) {
-                Text("Continue to Session Date →", color = DarkBackground, fontWeight = FontWeight.Bold)
+                Text("Continue to Session Date →", color = ButtonTextOnPrimary, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1064,15 +1091,357 @@ private fun ReviewAndEditScheduleStep(
             var room by remember(idx) { mutableStateOf(currentSub.defaultRoom) }
             var category by remember(idx) { mutableStateOf(currentSub.category) }
 
+            // Day slot addition state
+            var newSlotDay by remember(idx) { mutableIntStateOf(1) }
+            var newSlotTime by remember(idx) { mutableStateOf(if (currentSub.category == "Lab" || currentSub.category == "VAC") "02:00 PM - 04:00 PM" else "09:00 AM - 10:00 AM") }
+            var newSlotType by remember(idx) { mutableStateOf(if (currentSub.category == "Lab") "Lab" else "Lecture") }
+
             AlertDialog(
                 onDismissRequest = { editingSubjectIndex = null },
-                title = { Text("Edit Course / Elective", color = TextPrimary, fontWeight = FontWeight.Bold) },
+                title = { Text("Edit Course & Class Schedule", color = TextPrimary, fontWeight = FontWeight.Bold) },
                 text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        item {
+                            OutlinedTextField(
+                                value = name,
+                                onValueChange = { name = it },
+                                label = { Text("Course Name (e.g. AEC / VAC)") },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = NeonCyan,
+                                    unfocusedBorderColor = DarkBorder,
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        item {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = code,
+                                    onValueChange = { code = it },
+                                    label = { Text("Code") },
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = NeonCyan,
+                                        unfocusedBorderColor = DarkBorder,
+                                        focusedTextColor = TextPrimary,
+                                        unfocusedTextColor = TextPrimary
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                OutlinedTextField(
+                                    value = credits.toString(),
+                                    onValueChange = { credits = it.toIntOrNull() ?: 4 },
+                                    label = { Text("Credits") },
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = NeonCyan,
+                                        unfocusedBorderColor = DarkBorder,
+                                        focusedTextColor = TextPrimary,
+                                        unfocusedTextColor = TextPrimary
+                                    ),
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+
+                        item {
+                            OutlinedTextField(
+                                value = room,
+                                onValueChange = { room = it },
+                                label = { Text("Default Classroom / Hall") },
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = NeonCyan,
+                                    unfocusedBorderColor = DarkBorder,
+                                    focusedTextColor = TextPrimary,
+                                    unfocusedTextColor = TextPrimary
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+
+                        item {
+                            Column {
+                                Text("Category:", color = TextSecondary, fontSize = 11.sp)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    listOf("Core", "Elective", "VAC", "Lab").forEach { cat ->
+                                        FilterChip(
+                                            selected = category == cat,
+                                            onClick = { category = cat },
+                                            label = { Text(cat, fontSize = 11.sp, maxLines = 1) },
+                                            modifier = Modifier.weight(1f),
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = NeonPurple.copy(alpha = 0.3f),
+                                                selectedLabelColor = NeonPurple
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        item {
+                            HorizontalDivider(color = DarkBorder, thickness = 1.dp, modifier = Modifier.padding(vertical = 4.dp))
+                            Text(
+                                "📅 Scheduled Weekly Class Days:",
+                                color = NeonCyan,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                            Text(
+                                "Classes will be generated on these days. Delete any slot you don't attend (e.g. choose between Wed or Fri AEC/VAC).",
+                                color = TextMuted,
+                                fontSize = 10.sp
+                            )
+                        }
+
+                        val subjectSlots = slots.filter { it.first == idx }
+                        if (subjectSlots.isEmpty()) {
+                            item {
+                                Surface(
+                                    color = NeonAmber.copy(alpha = 0.1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        "⚠️ No weekly slots assigned! Add at least one day below so this course generates classes.",
+                                        color = NeonAmber,
+                                        fontSize = 11.sp,
+                                        modifier = Modifier.padding(8.dp)
+                                    )
+                                }
+                            }
+                        } else {
+                            items(subjectSlots) { pair ->
+                                val slot = pair.second
+                                val dayName = when (slot.dayOfWeek) {
+                                    1 -> "Monday"
+                                    2 -> "Tuesday"
+                                    3 -> "Wednesday"
+                                    4 -> "Thursday"
+                                    5 -> "Friday"
+                                    6 -> "Saturday"
+                                    else -> "Day ${slot.dayOfWeek}"
+                                }
+                                Surface(
+                                    color = DarkBackground,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Surface(
+                                                    color = NeonCyan.copy(alpha = 0.2f),
+                                                    shape = RoundedCornerShape(4.dp)
+                                                ) {
+                                                    Text(
+                                                        dayName,
+                                                        color = NeonCyan,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                    slot.slotType,
+                                                    color = TextSecondary,
+                                                    fontSize = 11.sp
+                                                )
+                                            }
+                                            Text(
+                                                "${slot.startTime} - ${slot.endTime} • ${slot.location}",
+                                                color = TextMuted,
+                                                fontSize = 10.sp
+                                            )
+                                        }
+
+                                        IconButton(
+                                            onClick = {
+                                                val mutableSlots = slots.toMutableList()
+                                                mutableSlots.remove(pair)
+                                                onUpdateSlots(mutableSlots)
+                                            },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.DeleteOutline,
+                                                contentDescription = "Remove Day Slot",
+                                                tint = NeonCrimson,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        item {
+                            Surface(
+                                color = DarkSurfaceCard,
+                                shape = RoundedCornerShape(10.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.3f)),
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("+ Add Class Day & Time Slot", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                    
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        listOf(
+                                            Pair(1, "Mon"),
+                                            Pair(2, "Tue"),
+                                            Pair(3, "Wed"),
+                                            Pair(4, "Thu"),
+                                            Pair(5, "Fri"),
+                                            Pair(6, "Sat")
+                                        ).forEach { (dayNum, dayLabel) ->
+                                            val isSel = newSlotDay == dayNum
+                                            Surface(
+                                                color = if (isSel) NeonCyan else DarkBackground,
+                                                shape = RoundedCornerShape(6.dp),
+                                                border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) NeonCyan else DarkBorder),
+                                                modifier = Modifier.weight(1f).clickable { newSlotDay = dayNum }
+                                            ) {
+                                                Text(
+                                                    text = dayLabel,
+                                                    color = if (isSel) DarkBackground else TextPrimary,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    textAlign = TextAlign.Center,
+                                                    modifier = Modifier.padding(vertical = 4.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    OutlinedTextField(
+                                        value = newSlotTime,
+                                        onValueChange = { newSlotTime = it },
+                                        label = { Text("Timing (e.g. 02:00 PM - 04:00 PM)") },
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = NeonCyan,
+                                            unfocusedBorderColor = DarkBorder,
+                                            focusedTextColor = TextPrimary,
+                                            unfocusedTextColor = TextPrimary
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        listOf("Lecture", "Lab", "Tutorial").forEach { st ->
+                                            FilterChip(
+                                                selected = newSlotType == st,
+                                                onClick = { newSlotType = st },
+                                                label = { Text(st, fontSize = 10.sp) },
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    selectedContainerColor = NeonCyan.copy(alpha = 0.2f),
+                                                    selectedLabelColor = NeonCyan
+                                                )
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        Button(
+                                            onClick = {
+                                                val parts = newSlotTime.split("-").map { it.trim() }
+                                                val sTime = parts.getOrNull(0) ?: "09:00 AM"
+                                                val eTime = parts.getOrNull(1) ?: "10:00 AM"
+                                                val createdSlot = ScheduleSlotEntity(
+                                                    id = 0,
+                                                    subjectId = 0,
+                                                    dayOfWeek = newSlotDay,
+                                                    startTime = sTime,
+                                                    endTime = eTime,
+                                                    location = room.ifBlank { "Pragya Bhavan PB-02" },
+                                                    slotType = newSlotType
+                                                )
+                                                onUpdateSlots(slots + Pair(idx, createdSlot))
+                                            },
+                                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan.copy(alpha = 0.25f)),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text("+ Add Slot", color = NeonCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            val updated = subjects.toMutableList()
+                            updated[idx] = currentSub.copy(
+                                name = name.trim(),
+                                code = code.trim(),
+                                credits = credits,
+                                defaultRoom = room.trim(),
+                                category = category
+                            )
+                            onUpdateSubjects(updated)
+                            editingSubjectIndex = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
+                    ) {
+                        Text("Save Changes", color = ButtonTextOnPrimary, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { editingSubjectIndex = null }) {
+                        Text("Cancel", color = TextMuted)
+                    }
+                },
+                containerColor = DarkSurfaceElevated
+            )
+        }
+    }
+
+    if (showAddSubjectDialog) {
+        var name by remember { mutableStateOf("") }
+        var code by remember { mutableStateOf("DTU-${300 + subjects.size * 2}") }
+        var credits by remember { mutableIntStateOf(4) }
+        var room by remember { mutableStateOf("Pragya Bhavan PB-02") }
+        var category by remember { mutableStateOf("Core") }
+
+        // Weekly scheduled days selection
+        var selectedDays by remember { mutableStateOf(setOf(1, 3, 5)) }
+        var slotTime by remember { mutableStateOf("09:00 AM - 10:00 AM") }
+        var slotType by remember { mutableStateOf("Lecture") }
+
+        AlertDialog(
+            onDismissRequest = { showAddSubjectDialog = false },
+            title = { Text("+ Add Course with Schedule", color = TextPrimary, fontWeight = FontWeight.Bold) },
+            text = {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    item {
                         OutlinedTextField(
                             value = name,
                             onValueChange = { name = it },
-                            label = { Text("Course Name (e.g. Elective-1 Name)") },
+                            label = { Text("Course Name (e.g. AEC / VAC or Machine Learning)") },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = NeonCyan,
                                 unfocusedBorderColor = DarkBorder,
@@ -1081,7 +1450,9 @@ private fun ReviewAndEditScheduleStep(
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
+                    }
 
+                    item {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedTextField(
                                 value = code,
@@ -1109,11 +1480,13 @@ private fun ReviewAndEditScheduleStep(
                                 modifier = Modifier.weight(1f)
                             )
                         }
+                    }
 
+                    item {
                         OutlinedTextField(
                             value = room,
                             onValueChange = { room = it },
-                            label = { Text("Default Classroom / Room") },
+                            label = { Text("Default Classroom / Hall") },
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = NeonCyan,
                                 unfocusedBorderColor = DarkBorder,
@@ -1122,120 +1495,118 @@ private fun ReviewAndEditScheduleStep(
                             ),
                             modifier = Modifier.fillMaxWidth()
                         )
+                    }
 
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
+                    item {
+                        Column {
                             Text("Category:", color = TextSecondary, fontSize = 11.sp)
-                            listOf("Core", "Elective", "VAC", "Lab").forEach { cat ->
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                listOf("Core", "Elective", "VAC", "Lab").forEach { cat ->
+                                    FilterChip(
+                                        selected = category == cat,
+                                        onClick = {
+                                            category = cat
+                                            if (cat == "Lab" || cat == "VAC") {
+                                                slotTime = "02:00 PM - 04:00 PM"
+                                                if (cat == "Lab") slotType = "Lab"
+                                                if (cat == "VAC") selectedDays = setOf(3, 5)
+                                            }
+                                        },
+                                        label = { Text(cat, fontSize = 11.sp, maxLines = 1) },
+                                        modifier = Modifier.weight(1f),
+                                        colors = FilterChipDefaults.filterChipColors(
+                                            selectedContainerColor = NeonPurple.copy(alpha = 0.3f),
+                                            selectedLabelColor = NeonPurple
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        HorizontalDivider(color = DarkBorder, thickness = 1.dp, modifier = Modifier.padding(vertical = 4.dp))
+                        Text(
+                            "🗓️ Select Which Days Class is Due:",
+                            color = NeonCyan,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            "Tap days to include. Attendance for this course will be scheduled on selected days.",
+                            color = TextMuted,
+                            fontSize = 10.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            listOf(
+                                Pair(1, "Mon"),
+                                Pair(2, "Tue"),
+                                Pair(3, "Wed"),
+                                Pair(4, "Thu"),
+                                Pair(5, "Fri"),
+                                Pair(6, "Sat")
+                            ).forEach { (dayNum, dayLabel) ->
+                                val isSel = selectedDays.contains(dayNum)
+                                Surface(
+                                    color = if (isSel) NeonCyan else DarkBackground,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isSel) NeonCyan else DarkBorder),
+                                    modifier = Modifier.weight(1f).clickable {
+                                        selectedDays = if (isSel) selectedDays - dayNum else selectedDays + dayNum
+                                    }
+                                ) {
+                                    Text(
+                                        text = dayLabel,
+                                        color = if (isSel) DarkBackground else TextPrimary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        OutlinedTextField(
+                            value = slotTime,
+                            onValueChange = { slotTime = it },
+                            label = { Text("Timing (e.g. 09:00 AM - 10:00 AM)") },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = NeonCyan,
+                                unfocusedBorderColor = DarkBorder,
+                                focusedTextColor = TextPrimary,
+                                unfocusedTextColor = TextPrimary
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("Lecture", "Lab", "Tutorial").forEach { st ->
                                 FilterChip(
-                                    selected = category == cat,
-                                    onClick = { category = cat },
-                                    label = { Text(cat, fontSize = 10.sp) },
+                                    selected = slotType == st,
+                                    onClick = { slotType = st },
+                                    label = { Text(st, fontSize = 10.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = NeonPurple.copy(alpha = 0.2f),
-                                        selectedLabelColor = NeonPurple
+                                        selectedContainerColor = NeonCyan.copy(alpha = 0.2f),
+                                        selectedLabelColor = NeonCyan
                                     )
                                 )
                             }
                         }
                     }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            val updated = subjects.toMutableList()
-                            updated[idx] = currentSub.copy(
-                                name = name.trim(),
-                                code = code.trim(),
-                                credits = credits,
-                                defaultRoom = room.trim(),
-                                category = category
-                            )
-                            onUpdateSubjects(updated)
-                            editingSubjectIndex = null
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
-                    ) {
-                        Text("Save Changes", color = DarkBackground, fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { editingSubjectIndex = null }) {
-                        Text("Cancel", color = TextMuted)
-                    }
-                },
-                containerColor = DarkSurfaceElevated
-            )
-        }
-    }
-
-    if (showAddSubjectDialog) {
-        var name by remember { mutableStateOf("") }
-        var code by remember { mutableStateOf("SE-${300 + subjects.size * 2}") }
-        var credits by remember { mutableIntStateOf(4) }
-        var room by remember { mutableStateOf("Pragya Bhavan PB-02") }
-        var category by remember { mutableStateOf("Core") }
-
-        AlertDialog(
-            onDismissRequest = { showAddSubjectDialog = false },
-            title = { Text("+ Add New Course", color = TextPrimary, fontWeight = FontWeight.Bold) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        label = { Text("Course Name") },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = NeonCyan,
-                            unfocusedBorderColor = DarkBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = code,
-                            onValueChange = { code = it },
-                            label = { Text("Code") },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = NeonCyan,
-                                unfocusedBorderColor = DarkBorder,
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary
-                            ),
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        OutlinedTextField(
-                            value = credits.toString(),
-                            onValueChange = { credits = it.toIntOrNull() ?: 4 },
-                            label = { Text("Credits") },
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = NeonCyan,
-                                unfocusedBorderColor = DarkBorder,
-                                focusedTextColor = TextPrimary,
-                                unfocusedTextColor = TextPrimary
-                            ),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    OutlinedTextField(
-                        value = room,
-                        onValueChange = { room = it },
-                        label = { Text("Default Classroom / Room") },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = NeonCyan,
-                            unfocusedBorderColor = DarkBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
                 }
             },
             confirmButton = {
@@ -1256,13 +1627,34 @@ private fun ReviewAndEditScheduleStep(
                                 category = category,
                                 credits = credits
                             )
+                            val newSubIndex = subjects.size
+                            val parts = slotTime.split("-").map { it.trim() }
+                            val sTime = parts.getOrNull(0) ?: "09:00 AM"
+                            val eTime = parts.getOrNull(1) ?: "10:00 AM"
+
+                            val newSlots = selectedDays.map { dayNum ->
+                                Pair(
+                                    newSubIndex,
+                                    ScheduleSlotEntity(
+                                        id = 0,
+                                        subjectId = 0,
+                                        dayOfWeek = dayNum,
+                                        startTime = sTime,
+                                        endTime = eTime,
+                                        location = room.trim().ifBlank { "Pragya Bhavan PB-02" },
+                                        slotType = slotType
+                                    )
+                                )
+                            }
+
                             onUpdateSubjects(subjects + newSub)
+                            onUpdateSlots(slots + newSlots)
                             showAddSubjectDialog = false
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
                 ) {
-                    Text("Add Course", color = DarkBackground, fontWeight = FontWeight.Bold)
+                    Text("Add Course & Schedule", color = ButtonTextOnPrimary, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -1286,6 +1678,18 @@ private fun SessionDateAndPastAttendanceStep(
     onBack: () -> Unit
 ) {
     var isCustomDateDialogOpen by remember { mutableStateOf(false) }
+    val distinctDates = remember(pastClasses) { pastClasses.map { it.dateStr }.distinct() }
+    var selectedDateIndex by remember(distinctDates) { mutableIntStateOf(0) }
+    var viewMode by remember { mutableStateOf("WINDOW") } // "WINDOW" or "LIST"
+    val calendarStripState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+
+    // Ensure selected index is within bounds
+    LaunchedEffect(distinctDates.size) {
+        if (selectedDateIndex >= distinctDates.size && distinctDates.isNotEmpty()) {
+            selectedDateIndex = distinctDates.size - 1
+        }
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -1356,26 +1760,14 @@ private fun SessionDateAndPastAttendanceStep(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
 
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "Active Start Date: $sessionStartDate",
-                                color = NeonCyan,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                            )
-                            TextButton(
-                                onClick = { isCustomDateDialogOpen = true },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Text("Custom Date ✏️", color = NeonPurple, fontSize = 11.sp)
-                            }
-                        }
+                        AttendOSDateSelectorCard(
+                            label = "Active Semester Start Date",
+                            selectedDate = sessionStartDate,
+                            onDateSelected = onStartDateChange,
+                            pickerTitle = "Select Semester Start Date"
+                        )
                     }
                 }
             }
@@ -1534,48 +1926,304 @@ private fun SessionDateAndPastAttendanceStep(
                     }
                 }
             } else {
-                val groupedByDate = pastClasses.groupBy { it.dateDisplay }
-                groupedByDate.forEach { (dateHeader, classesForDate) ->
+                // View Mode Switcher
+                item {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    ) {
+                        Text(
+                            text = "Date-by-Date Attendance",
+                            fontWeight = FontWeight.Bold,
+                            color = NeonCyan,
+                            fontSize = 14.sp
+                        )
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Surface(
+                                color = if (viewMode == "WINDOW") NeonCyan.copy(alpha = 0.2f) else DarkBackground,
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (viewMode == "WINDOW") NeonCyan else DarkBorder),
+                                modifier = Modifier.clickable { viewMode = "WINDOW" }
+                            ) {
+                                Text(
+                                    text = "Interactive Window",
+                                    color = if (viewMode == "WINDOW") NeonCyan else TextMuted,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+
+                            Surface(
+                                color = if (viewMode == "LIST") NeonPurple.copy(alpha = 0.2f) else DarkBackground,
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, if (viewMode == "LIST") NeonPurple else DarkBorder),
+                                modifier = Modifier.clickable { viewMode = "LIST" }
+                            ) {
+                                Text(
+                                    text = "All Days List",
+                                    color = if (viewMode == "LIST") NeonPurple else TextMuted,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (viewMode == "WINDOW") {
+                    val activeDateStr = distinctDates.getOrNull(selectedDateIndex) ?: ""
+                    val classesOnSelectedDate = pastClasses.filter { it.dateStr == activeDateStr }
+                    val activeDateDisplay = classesOnSelectedDate.firstOrNull()?.dateDisplay ?: activeDateStr
+
+                    // Calendar Ribbon Strip
                     item {
                         Surface(
-                            color = NeonPurple.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                            color = DarkSurfaceCard,
+                            shape = RoundedCornerShape(16.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text(
-                                text = dateHeader,
-                                color = NeonCyan,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                // Shortcuts Bar
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    // First Day shortcut
+                                    Surface(
+                                        color = if (selectedDateIndex == 0) NeonCyan.copy(alpha = 0.25f) else DarkBackground,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (selectedDateIndex == 0) NeonCyan else DarkBorder),
+                                        modifier = Modifier.clickable {
+                                            selectedDateIndex = 0
+                                            coroutineScope.launch { calendarStripState.animateScrollToItem(0) }
+                                        }
+                                    ) {
+                                        Text(
+                                            text = "⏮ Sem Start",
+                                            color = if (selectedDateIndex == 0) NeonCyan else TextSecondary,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 10.sp,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+
+                                    // Today shortcut
+                                    val lastIdx = (distinctDates.size - 1).coerceAtLeast(0)
+                                    Surface(
+                                        color = if (selectedDateIndex == lastIdx) NeonEmerald.copy(alpha = 0.25f) else DarkBackground,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (selectedDateIndex == lastIdx) NeonEmerald else DarkBorder),
+                                        modifier = Modifier.clickable {
+                                            selectedDateIndex = lastIdx
+                                            coroutineScope.launch { calendarStripState.animateScrollToItem(lastIdx) }
+                                        }
+                                    ) {
+                                        Text(
+                                            text = "⚡ Today",
+                                            color = if (selectedDateIndex == lastIdx) NeonEmerald else TextSecondary,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 10.sp,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.weight(1f))
+
+                                    // Mark Day All Present
+                                    Surface(
+                                        color = Color(0xFF00FF9D).copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00FF9D).copy(alpha = 0.4f)),
+                                        modifier = Modifier.clickable {
+                                            val updated = pastClasses.map {
+                                                if (it.dateStr == activeDateStr) it.copy(status = "PRESENT") else it
+                                            }
+                                            onUpdatePastClasses(updated)
+                                        }
+                                    ) {
+                                        Text(
+                                            text = "Day ✅ All",
+                                            color = Color(0xFF00FF9D),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 10.sp,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+
+                                    // Mark Day All Absent
+                                    Surface(
+                                        color = Color(0xFFFF2A6D).copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF2A6D).copy(alpha = 0.4f)),
+                                        modifier = Modifier.clickable {
+                                            val updated = pastClasses.map {
+                                                if (it.dateStr == activeDateStr) it.copy(status = "ABSENT") else it
+                                            }
+                                            onUpdatePastClasses(updated)
+                                        }
+                                    ) {
+                                        Text(
+                                            text = "Day ❌ All",
+                                            color = Color(0xFFFF2A6D),
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 10.sp,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Horizontal Calendar Ribbon
+                                LazyRow(
+                                    state = calendarStripState,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    itemsIndexed(distinctDates) { idx, dateStr ->
+                                        val isSelected = idx == selectedDateIndex
+                                        val classesForThisDate = pastClasses.filter { it.dateStr == dateStr }
+                                        val display = classesForThisDate.firstOrNull()?.dateDisplay ?: dateStr
+                                        // Parse components: e.g. "Mon, 12 Aug"
+                                        val parts = display.split(" ")
+                                        val dayOfWeek = parts.getOrNull(0)?.replace(",", "") ?: ""
+                                        val dayNum = parts.getOrNull(1) ?: ""
+                                        val month = parts.getOrNull(2) ?: ""
+
+                                        val allPresent = classesForThisDate.isNotEmpty() && classesForThisDate.all { it.status == "PRESENT" }
+                                        val anyAbsent = classesForThisDate.any { it.status == "ABSENT" }
+
+                                        Surface(
+                                            color = if (isSelected) AppTheme.colors.surfaceElevated else AppTheme.colors.surfaceCard,
+                                            shape = RoundedCornerShape(12.dp),
+                                            border = androidx.compose.foundation.BorderStroke(
+                                                if (isSelected) 1.5.dp else 1.dp,
+                                                if (isSelected) NeonCyan else DarkBorder
+                                            ),
+                                            modifier = Modifier
+                                                .width(56.dp)
+                                                .clickable {
+                                                    selectedDateIndex = idx
+                                                }
+                                        ) {
+                                            Column(
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                modifier = Modifier.padding(vertical = 6.dp, horizontal = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = dayOfWeek.uppercase(),
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isSelected) NeonCyan else TextMuted
+                                                )
+                                                Text(
+                                                    text = dayNum,
+                                                    fontSize = 16.sp,
+                                                    fontWeight = FontWeight.Black,
+                                                    color = if (isSelected) Color.White else TextPrimary
+                                                )
+                                                Text(
+                                                    text = month,
+                                                    fontSize = 9.sp,
+                                                    color = if (isSelected) NeonCyan else TextMuted
+                                                )
+
+                                                Spacer(modifier = Modifier.height(3.dp))
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(6.dp)
+                                                        .clip(CircleShape)
+                                                        .background(
+                                                            when {
+                                                                allPresent -> Color(0xFF00FF9D)
+                                                                anyAbsent -> Color(0xFFFF2A6D)
+                                                                else -> Color(0xFFFFB800)
+                                                            }
+                                                        )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 
-                    items(classesForDate) { item ->
+                    // Active Date Card Header
+                    item {
                         Surface(
-                            color = DarkSurfaceCard,
+                            color = NeonPurple.copy(alpha = 0.15f),
                             shape = RoundedCornerShape(12.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.4f)),
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Column {
+                                    Text(
+                                        text = activeDateDisplay,
+                                        color = NeonCyan,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "${classesOnSelectedDate.size} classes scheduled",
+                                        color = TextSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                }
+
+                                Surface(
+                                    color = DarkBackground,
+                                    shape = RoundedCornerShape(8.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+                                ) {
+                                    Text(
+                                        text = "Day ${selectedDateIndex + 1} of ${distinctDates.size}",
+                                        color = TextPrimary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Classes for Active Date
+                    items(classesOnSelectedDate) { item ->
+                        Surface(
+                            color = AppTheme.colors.surfaceCard,
+                            shape = RoundedCornerShape(14.dp),
                             border = androidx.compose.foundation.BorderStroke(
                                 1.dp,
                                 when (item.status) {
-                                    "PRESENT" -> NeonEmerald.copy(alpha = 0.5f)
-                                    "ABSENT" -> NeonCrimson.copy(alpha = 0.5f)
-                                    else -> DarkBorder
+                                    "PRESENT" -> Color(0xFF00FF9D).copy(alpha = 0.5f)
+                                    "ABSENT" -> Color(0xFFFF2A6D).copy(alpha = 0.5f)
+                                    else -> Color(0xFFFFB800).copy(alpha = 0.5f)
                                 }
                             ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(10.dp)
+                                modifier = Modifier.padding(12.dp)
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = item.subjectName,
                                         fontWeight = FontWeight.Bold,
                                         color = TextPrimary,
-                                        fontSize = 13.sp
+                                        fontSize = 14.sp
                                     )
                                     Text(
                                         text = "${item.slotTime} • ${item.location} • ${item.slotType}",
@@ -1585,10 +2233,11 @@ private fun SessionDateAndPastAttendanceStep(
                                 }
 
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    // Present Button
                                     Surface(
-                                        color = if (item.status == "PRESENT") NeonEmerald else DarkBackground,
-                                        shape = RoundedCornerShape(6.dp),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (item.status == "PRESENT") NeonEmerald else DarkBorder),
+                                        color = if (item.status == "PRESENT") Color(0xFF00FF9D) else DarkBackground,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (item.status == "PRESENT") Color(0xFF00FF9D) else DarkBorder),
                                         modifier = Modifier.clickable {
                                             val updated = pastClasses.map {
                                                 if (it.id == item.id) it.copy(status = "PRESENT") else it
@@ -1598,17 +2247,18 @@ private fun SessionDateAndPastAttendanceStep(
                                     ) {
                                         Text(
                                             text = "Present ✅",
-                                            color = if (item.status == "PRESENT") DarkBackground else NeonEmerald,
-                                            fontWeight = FontWeight.Bold,
+                                            color = if (item.status == "PRESENT") DarkBackground else Color(0xFF00FF9D),
+                                            fontWeight = FontWeight.Black,
                                             fontSize = 10.sp,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                                         )
                                     }
 
+                                    // Absent Button
                                     Surface(
-                                        color = if (item.status == "ABSENT") NeonCrimson else DarkBackground,
-                                        shape = RoundedCornerShape(6.dp),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (item.status == "ABSENT") NeonCrimson else DarkBorder),
+                                        color = if (item.status == "ABSENT") Color(0xFFFF2A6D) else DarkBackground,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (item.status == "ABSENT") Color(0xFFFF2A6D) else DarkBorder),
                                         modifier = Modifier.clickable {
                                             val updated = pastClasses.map {
                                                 if (it.id == item.id) it.copy(status = "ABSENT") else it
@@ -1618,17 +2268,18 @@ private fun SessionDateAndPastAttendanceStep(
                                     ) {
                                         Text(
                                             text = "Absent ❌",
-                                            color = if (item.status == "ABSENT") Color.White else NeonCrimson,
-                                            fontWeight = FontWeight.Bold,
+                                            color = if (item.status == "ABSENT") Color.White else Color(0xFFFF2A6D),
+                                            fontWeight = FontWeight.Black,
                                             fontSize = 10.sp,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
                                         )
                                     }
 
+                                    // Cancelled Button
                                     Surface(
-                                        color = if (item.status == "CANCELLED") TextMuted else DarkBackground,
-                                        shape = RoundedCornerShape(6.dp),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (item.status == "CANCELLED") TextMuted else DarkBorder),
+                                        color = if (item.status == "CANCELLED") Color(0xFFFFB800) else DarkBackground,
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, if (item.status == "CANCELLED") Color(0xFFFFB800) else DarkBorder),
                                         modifier = Modifier.clickable {
                                             val updated = pastClasses.map {
                                                 if (it.id == item.id) it.copy(status = "CANCELLED") else it
@@ -1637,12 +2288,187 @@ private fun SessionDateAndPastAttendanceStep(
                                         }
                                     ) {
                                         Text(
-                                            text = "Cancelled ⚪",
-                                            color = if (item.status == "CANCELLED") DarkBackground else TextMuted,
+                                            text = "Off ⚪",
+                                            color = if (item.status == "CANCELLED") DarkBackground else Color(0xFFFFB800),
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 10.sp,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp)
                                         )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Next Day / Prev Day Navigation Stepper
+                    item {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    if (selectedDateIndex > 0) {
+                                        selectedDateIndex -= 1
+                                        coroutineScope.launch {
+                                            calendarStripState.animateScrollToItem(selectedDateIndex)
+                                        }
+                                    }
+                                },
+                                enabled = selectedDateIndex > 0,
+                                modifier = Modifier.weight(1f).height(44.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Prev Day", fontSize = 12.sp, color = TextPrimary)
+                            }
+
+                            val isLastDay = selectedDateIndex >= distinctDates.size - 1
+                            Button(
+                                onClick = {
+                                    if (!isLastDay) {
+                                        selectedDateIndex += 1
+                                        coroutineScope.launch {
+                                            calendarStripState.animateScrollToItem(selectedDateIndex)
+                                        }
+                                    } else {
+                                        onProceed()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isLastDay) NeonEmerald else Color(0xFFB537F2)
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1.5f).height(44.dp)
+                            ) {
+                                Text(
+                                    text = if (isLastDay) "Finish Past Days ✅" else "Next Day →",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                                if (!isLastDay) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Full List Mode
+                    val groupedByDate = pastClasses.groupBy { it.dateDisplay }
+                    groupedByDate.forEach { (dateHeader, classesForDate) ->
+                        item {
+                            Surface(
+                                color = NeonPurple.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp)
+                            ) {
+                                Text(
+                                    text = dateHeader,
+                                    color = NeonCyan,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+
+                        items(classesForDate) { item ->
+                            Surface(
+                                color = DarkSurfaceCard,
+                                shape = RoundedCornerShape(12.dp),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    when (item.status) {
+                                        "PRESENT" -> NeonEmerald.copy(alpha = 0.5f)
+                                        "ABSENT" -> NeonCrimson.copy(alpha = 0.5f)
+                                        else -> DarkBorder
+                                    }
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(10.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = item.subjectName,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimary,
+                                            fontSize = 13.sp
+                                        )
+                                        Text(
+                                            text = "${item.slotTime} • ${item.location} • ${item.slotType}",
+                                            color = TextMuted,
+                                            fontSize = 11.sp
+                                        )
+                                    }
+
+                                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Surface(
+                                            color = if (item.status == "PRESENT") NeonEmerald else DarkBackground,
+                                            shape = RoundedCornerShape(6.dp),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, if (item.status == "PRESENT") NeonEmerald else DarkBorder),
+                                            modifier = Modifier.clickable {
+                                                val updated = pastClasses.map {
+                                                    if (it.id == item.id) it.copy(status = "PRESENT") else it
+                                                }
+                                                onUpdatePastClasses(updated)
+                                            }
+                                        ) {
+                                            Text(
+                                                text = "Present ✅",
+                                                color = if (item.status == "PRESENT") DarkBackground else NeonEmerald,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 10.sp,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+
+                                        Surface(
+                                            color = if (item.status == "ABSENT") NeonCrimson else DarkBackground,
+                                            shape = RoundedCornerShape(6.dp),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, if (item.status == "ABSENT") NeonCrimson else DarkBorder),
+                                            modifier = Modifier.clickable {
+                                                val updated = pastClasses.map {
+                                                    if (it.id == item.id) it.copy(status = "ABSENT") else it
+                                                }
+                                                onUpdatePastClasses(updated)
+                                            }
+                                        ) {
+                                            Text(
+                                                text = "Absent ❌",
+                                                color = if (item.status == "ABSENT") Color.White else NeonCrimson,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 10.sp,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                            )
+                                        }
+
+                                        Surface(
+                                            color = if (item.status == "CANCELLED") TextMuted else DarkBackground,
+                                            shape = RoundedCornerShape(6.dp),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, if (item.status == "CANCELLED") TextMuted else DarkBorder),
+                                            modifier = Modifier.clickable {
+                                                val updated = pastClasses.map {
+                                                    if (it.id == item.id) it.copy(status = "CANCELLED") else it
+                                                }
+                                                onUpdatePastClasses(updated)
+                                            }
+                                        ) {
+                                            Text(
+                                                text = "Cancelled ⚪",
+                                                color = if (item.status == "CANCELLED") DarkBackground else TextMuted,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 10.sp,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1672,52 +2498,20 @@ private fun SessionDateAndPastAttendanceStep(
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.weight(2f).height(48.dp).testTag("btn_proceed_to_alarms")
             ) {
-                Text("Continue to Alarms & Finish →", color = DarkBackground, fontWeight = FontWeight.Bold)
+                Text("Continue to Alarms & Finish →", color = ButtonTextOnPrimary, fontWeight = FontWeight.Bold)
             }
         }
     }
 
     if (isCustomDateDialogOpen) {
-        var customDateInput by remember { mutableStateOf(sessionStartDate) }
-        AlertDialog(
-            onDismissRequest = { isCustomDateDialogOpen = false },
-            title = { Text("Enter Session Start Date", color = TextPrimary, fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Text("Format: YYYY-MM-DD (e.g. 2026-08-01)", color = TextMuted, fontSize = 12.sp)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = customDateInput,
-                        onValueChange = { customDateInput = it },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = NeonCyan,
-                            unfocusedBorderColor = DarkBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
+        AttendOSDatePickerDialog(
+            title = "Select Semester Start Date",
+            initialDate = sessionStartDate,
+            onDateSelected = { selectedDate ->
+                onStartDateChange(selectedDate)
+                isCustomDateDialogOpen = false
             },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        if (customDateInput.isNotBlank()) {
-                            onStartDateChange(customDateInput.trim())
-                            isCustomDateDialogOpen = false
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
-                ) {
-                    Text("Set Start Date", color = DarkBackground, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { isCustomDateDialogOpen = false }) {
-                    Text("Cancel", color = TextMuted)
-                }
-            },
-            containerColor = DarkSurfaceElevated
+            onDismiss = { isCustomDateDialogOpen = false }
         )
     }
 }
@@ -2017,11 +2811,11 @@ private fun AlarmAndFinishStep(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(2f).height(50.dp).testTag("btn_complete_setup")
                 ) {
-                    Icon(Icons.Default.RocketLaunch, contentDescription = null, tint = DarkBackground)
+                    Icon(Icons.Default.RocketLaunch, contentDescription = null, tint = ButtonTextOnPrimary)
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "Complete & Launch AttendOS",
-                        color = DarkBackground,
+                        color = ButtonTextOnPrimary,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp
                     )
@@ -2181,7 +2975,7 @@ private fun loadDTUStarterTemplate(
         SubjectEntity(name = "Database Management Systems", code = "SE-307", conductedClasses = 0, attendedClasses = 0, defaultRoom = "AB-4 Room 204", colorHex = "#EA580C", credits = 4),
         SubjectEntity(name = "Software Engineering Lab", code = "SE-309", conductedClasses = 0, attendedClasses = 0, defaultRoom = "AB-4 Lab-1", category = "Lab", colorHex = "#A855F7", credits = 2),
         SubjectEntity(name = "ML & Data Science Lab", code = "SE-311", conductedClasses = 0, attendedClasses = 0, defaultRoom = "PB AI Lab 302", category = "Lab", colorHex = "#3B82F6", credits = 2),
-        SubjectEntity(name = "Economics for Engineers", code = "HU-301", conductedClasses = 0, attendedClasses = 0, defaultRoom = "Tw-1 Tech Wing", category = "Elective", colorHex = "#14B8A6", credits = 3)
+        SubjectEntity(name = "AEC / VAC (Selected)", code = "VAC-101", conductedClasses = 0, attendedClasses = 0, defaultRoom = "Tw-1 Tech Wing", category = "VAC", colorHex = "#14B8A6", credits = 3)
     )
 
     val assignments = listOf(

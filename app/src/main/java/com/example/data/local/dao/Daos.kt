@@ -4,6 +4,7 @@ import androidx.room.*
 import com.example.data.local.entity.AcademicBreakEntity
 import com.example.data.local.entity.AttendanceRecordEntity
 import com.example.data.local.entity.ScheduleSlotEntity
+import com.example.data.local.entity.SemesterEntity
 import com.example.data.local.entity.SubjectEntity
 import com.example.data.local.entity.UserProfileEntity
 import kotlinx.coroutines.flow.Flow
@@ -21,6 +22,15 @@ data class SlotWithSubject(
 interface SubjectDao {
     @Query("SELECT * FROM subjects ORDER BY name ASC")
     fun getAllSubjects(): Flow<List<SubjectEntity>>
+
+    @Query("SELECT * FROM subjects ORDER BY name ASC")
+    suspend fun getAllSubjectsList(): List<SubjectEntity>
+
+    @Query("SELECT * FROM subjects WHERE semesterId = :semesterId ORDER BY name ASC")
+    fun getSubjectsForSemester(semesterId: Long): Flow<List<SubjectEntity>>
+
+    @Query("SELECT * FROM subjects WHERE semesterId = :semesterId ORDER BY name ASC")
+    suspend fun getSubjectsListForSemester(semesterId: Long): List<SubjectEntity>
 
     @Query("SELECT * FROM subjects WHERE id = :id")
     suspend fun getSubjectById(id: Long): SubjectEntity?
@@ -62,6 +72,9 @@ interface ScheduleSlotDao {
     @Query("SELECT * FROM schedule_slots ORDER BY dayOfWeek ASC, startTime ASC")
     fun getAllSlotsWithSubjects(): Flow<List<SlotWithSubject>>
 
+    @Query("SELECT * FROM schedule_slots")
+    suspend fun getAllSlotsList(): List<ScheduleSlotEntity>
+
     @Transaction
     @Query("SELECT * FROM schedule_slots WHERE dayOfWeek = :dayOfWeek ORDER BY startTime ASC")
     fun getSlotsForDayWithSubjects(dayOfWeek: Int): Flow<List<SlotWithSubject>>
@@ -89,6 +102,9 @@ interface ScheduleSlotDao {
 interface AttendanceRecordDao {
     @Query("SELECT * FROM attendance_records ORDER BY timestamp DESC")
     fun getAllRecords(): Flow<List<AttendanceRecordEntity>>
+
+    @Query("SELECT * FROM attendance_records ORDER BY timestamp DESC")
+    suspend fun getAllRecordsList(): List<AttendanceRecordEntity>
 
     @Query("SELECT * FROM attendance_records WHERE subjectId = :subjectId ORDER BY timestamp DESC")
     fun getRecordsForSubject(subjectId: Long): Flow<List<AttendanceRecordEntity>>
@@ -152,4 +168,43 @@ interface AcademicBreakDao {
 
     @Query("DELETE FROM academic_breaks WHERE id = :id")
     suspend fun deleteBreakById(id: Long)
+}
+
+@Dao
+interface SemesterDao {
+    @Query("SELECT * FROM semesters ORDER BY semesterNumber DESC")
+    fun getAllSemesters(): Flow<List<SemesterEntity>>
+
+    @Query("SELECT * FROM semesters ORDER BY semesterNumber DESC")
+    suspend fun getAllSemestersList(): List<SemesterEntity>
+
+    @Query("SELECT * FROM semesters WHERE isCurrent = 1 LIMIT 1")
+    fun getCurrentSemesterFlow(): Flow<SemesterEntity?>
+
+    @Query("SELECT * FROM semesters WHERE isCurrent = 1 LIMIT 1")
+    suspend fun getCurrentSemester(): SemesterEntity?
+
+    @Query("SELECT * FROM semesters WHERE id = :id")
+    suspend fun getSemesterById(id: Long): SemesterEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSemester(semester: SemesterEntity): Long
+
+    @Update
+    suspend fun updateSemester(semester: SemesterEntity)
+
+    @Query("UPDATE semesters SET isCurrent = 0")
+    suspend fun clearCurrentSemesterFlags()
+
+    @Query("UPDATE semesters SET isCurrent = 1 WHERE id = :id")
+    suspend fun setCurrentSemester(id: Long)
+
+    @Query("UPDATE semesters SET isLocked = 1, lockedAtTimestamp = :timestamp, finalAttendancePercentage = :finalPct, totalConducted = :conducted, totalAttended = :attended WHERE id = :id")
+    suspend fun lockSemester(id: Long, finalPct: Double, conducted: Int, attended: Int, timestamp: Long)
+
+    @Query("DELETE FROM semesters WHERE id = :id")
+    suspend fun deleteSemester(id: Long)
+
+    @Query("DELETE FROM semesters")
+    suspend fun deleteAllSemesters()
 }

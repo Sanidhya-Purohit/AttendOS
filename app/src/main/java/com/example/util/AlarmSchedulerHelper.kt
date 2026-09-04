@@ -99,20 +99,17 @@ object AlarmSchedulerHelper {
         )
 
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (alarmManager.canScheduleExactAlarms()) {
-                    alarmManager.setExactAndAllowWhileIdle(
-                        AlarmManager.RTC_WAKEUP,
-                        alarmTimeCal.timeInMillis,
-                        updatedPendingIntent
-                    )
-                } else {
-                    alarmManager.set(
-                        AlarmManager.RTC_WAKEUP,
-                        alarmTimeCal.timeInMillis,
-                        updatedPendingIntent
-                    )
-                }
+            // Use setAlarmClock: Highest priority alarm on Android, displays alarm icon in status bar, wakes Doze mode
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                val showIntent = Intent(context, com.example.MainActivity::class.java)
+                val showPendingIntent = PendingIntent.getActivity(
+                    context,
+                    9998,
+                    showIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+                )
+                val clockInfo = AlarmManager.AlarmClockInfo(alarmTimeCal.timeInMillis, showPendingIntent)
+                alarmManager.setAlarmClock(clockInfo, updatedPendingIntent)
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 alarmManager.setExactAndAllowWhileIdle(
                     AlarmManager.RTC_WAKEUP,
@@ -128,11 +125,19 @@ object AlarmSchedulerHelper {
             }
         } catch (e: Throwable) {
             try {
-                alarmManager.set(
-                    AlarmManager.RTC_WAKEUP,
-                    alarmTimeCal.timeInMillis,
-                    updatedPendingIntent
-                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        alarmTimeCal.timeInMillis,
+                        updatedPendingIntent
+                    )
+                } else {
+                    alarmManager.set(
+                        AlarmManager.RTC_WAKEUP,
+                        alarmTimeCal.timeInMillis,
+                        updatedPendingIntent
+                    )
+                }
             } catch (ignored: Throwable) {
                 // Safely ignore if system restricts alarm
             }
@@ -200,21 +205,87 @@ object AlarmSchedulerHelper {
         context: Context,
         hour: Int,
         minute: Int,
-        message: String = "DTU First Class Wake-Up"
+        message: String = "DTU First Class Wake-Up",
+        days: ArrayList<Int>? = null
     ) {
         val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
             putExtra(AlarmClock.EXTRA_HOUR, hour)
             putExtra(AlarmClock.EXTRA_MINUTES, minute)
             putExtra(AlarmClock.EXTRA_MESSAGE, message)
-            putExtra(AlarmClock.EXTRA_SKIP_UI, false)
+            putExtra(AlarmClock.EXTRA_VIBRATE, true)
+            putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+            if (days != null && days.isNotEmpty()) {
+                putIntegerArrayListExtra(AlarmClock.EXTRA_DAYS, days)
+            }
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
         try {
             context.startActivity(intent)
-            Toast.makeText(context, "Alarm synced with Phone Clock App for %02d:%02d".format(hour, minute), Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "✅ Phone Alarm Set for %02d:%02d".format(hour, minute), Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
-            Toast.makeText(context, "Alarm set in Draco at %02d:%02d".format(hour, minute), Toast.LENGTH_SHORT).show()
+            // If skip UI fails or security exception, open clock with UI
+            try {
+                val fallbackIntent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
+                    putExtra(AlarmClock.EXTRA_HOUR, hour)
+                    putExtra(AlarmClock.EXTRA_MINUTES, minute)
+                    putExtra(AlarmClock.EXTRA_MESSAGE, message)
+                    putExtra(AlarmClock.EXTRA_SKIP_UI, false)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(fallbackIntent)
+            } catch (ignored: Exception) {
+                Toast.makeText(context, "System alarm configured at %02d:%02d".format(hour, minute), Toast.LENGTH_SHORT).show()
+            }
         }
+    }
+
+    fun syncFullWeekAlarmsWithPhoneClock(
+        context: Context,
+        slots: List<SlotWithSubject>,
+        leadHours: Double
+    ) {
+        if (slots.isEmpty()) {
+            Toast.makeText(context, "No classes in timetable to schedule alarms for.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Calendar.MONDAY = 2, ..., Calendar.SATURDAY = 7
+        val dayMapping = mapOf(
+            1 to Calendar.MONDAY,
+            2 to Calendar.TUESDAY,
+            3 to Calendar.WEDNESDAY,
+            4 to Calendar.THURSDAY,
+            5 to Calendar.FRIDAY,
+            6 to Calendar.SATURDAY
+        )
+
+        // Find earliest class for each day
+        var syncedCount = 0
+        for (dayIndex in 1..6) {
+            val daySlots = slots.filter { it.slot.dayOfWeek == dayIndex }
+                .sortedBy { parseTimeToMinutes(it.slot.startTime) }
+
+            if (daySlots.isNotEmpty()) {
+                val firstClass = daySlots.first()
+                val startMins = parseTimeToMinutes(firstClass.slot.startTime)
+                val leadMins = (leadHours * 60).toInt()
+                val alarmMins = (startMins - leadMins).coerceAtLeast(0)
+                val hour = alarmMins / 60
+                val minute = alarmMins % 60
+                val calDay = dayMapping[dayIndex] ?: Calendar.MONDAY
+
+                setSystemClockAlarm(
+                    context = context,
+                    hour = hour,
+                    minute = minute,
+                    message = "AttendOS: ${firstClass.subject.name} (${firstClass.slot.startTime})",
+                    days = arrayListOf(calDay)
+                )
+                syncedCount++
+            }
+        }
+
+        Toast.makeText(context, "⚡ Successfully synced $syncedCount native phone alarms with Phone Clock app!", Toast.LENGTH_LONG).show()
     }
 
     fun parseTimeToMinutes(timeStr: String): Int {

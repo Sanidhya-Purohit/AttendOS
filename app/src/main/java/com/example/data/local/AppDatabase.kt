@@ -7,26 +7,30 @@ import androidx.room.RoomDatabase
 import com.example.data.local.dao.AcademicBreakDao
 import com.example.data.local.dao.AttendanceRecordDao
 import com.example.data.local.dao.ScheduleSlotDao
+import com.example.data.local.dao.SemesterDao
 import com.example.data.local.dao.SubjectDao
 import com.example.data.local.dao.UserProfileDao
 import com.example.data.local.entity.AcademicBreakEntity
 import com.example.data.local.entity.AttendanceRecordEntity
 import com.example.data.local.entity.ScheduleSlotEntity
+import com.example.data.local.entity.SemesterEntity
 import com.example.data.local.entity.SubjectEntity
 import com.example.data.local.entity.UserProfileEntity
 
 @Database(
     entities = [
+        SemesterEntity::class,
         SubjectEntity::class,
         ScheduleSlotEntity::class,
         AttendanceRecordEntity::class,
         UserProfileEntity::class,
         AcademicBreakEntity::class
     ],
-    version = 3,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
+    abstract fun semesterDao(): SemesterDao
     abstract fun subjectDao(): SubjectDao
     abstract fun scheduleSlotDao(): ScheduleSlotDao
     abstract fun attendanceRecordDao(): AttendanceRecordDao

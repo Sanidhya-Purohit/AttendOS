@@ -31,9 +31,12 @@ import com.example.domain.AttendanceTier
 import com.example.ui.components.*
 import com.example.ui.screens.attendance.AcademicBreaksDialog
 import com.example.ui.screens.attendance.CalendarAttendanceDialog
+import com.example.ui.screens.attendance.DayWiseAttendanceEditDialog
 import com.example.ui.screens.attendance.MissedClassesDialog
+import com.example.ui.screens.settings.SemesterManagementDialog
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.AttendanceViewModel
+import com.example.util.AlarmSchedulerHelper
 import java.util.Locale
 
 @Composable
@@ -57,6 +60,8 @@ fun DashboardScreen(
     var isCalendarAttendanceOpen by remember { mutableStateOf(false) }
     var isMissedClassesOpen by remember { mutableStateOf(false) }
     var isAcademicBreaksOpen by remember { mutableStateOf(false) }
+    var isDayWiseAttendanceOpen by remember { mutableStateOf(false) }
+    var isSemesterManagementOpen by remember { mutableStateOf(false) }
 
     val daySlots = remember(allSlotsWithSubs, selectedDay) {
         allSlotsWithSubs.filter { it.slot.dayOfWeek == selectedDay }
@@ -67,6 +72,9 @@ fun DashboardScreen(
 
     var showSuccessSnackbar by remember { mutableStateOf<String?>(null) }
 
+    val themeMode by viewModel.themeMode.collectAsState()
+    val isDark = AppTheme.colors.isDark
+
     Scaffold(
         topBar = {
             DashboardTopBar(
@@ -74,11 +82,13 @@ fun DashboardScreen(
                 branch = profile?.branch ?: "Software Engineering (SE)",
                 streak = profile?.currentStreak ?: 0,
                 notificationCount = notifications.size,
+                isDark = isDark,
+                onToggleTheme = { viewModel.toggleTheme() },
                 onOpenNotifications = onOpenNotifications,
                 onOpenSettings = onOpenSettings
             )
         },
-        containerColor = DarkBackground,
+        containerColor = AppTheme.colors.background,
         modifier = modifier.testTag("screen_dashboard")
     ) { innerPadding ->
         LazyColumn(
@@ -167,99 +177,207 @@ fun DashboardScreen(
 
             // Quick Tools Bar: Calendar Attendance, Missed Classes Log & College Fests/Breaks
             item {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Calendar Log
-                    Surface(
-                        color = DarkSurfaceCard,
-                        shape = RoundedCornerShape(14.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable { isCalendarAttendanceOpen = true }
-                            .testTag("btn_dashboard_calendar_attendance")
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp)
+                        // Calendar Log
+                        Surface(
+                            color = DarkSurfaceCard,
+                            shape = RoundedCornerShape(14.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { isCalendarAttendanceOpen = true }
+                                .testTag("btn_dashboard_calendar_attendance")
                         ) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(CircleShape)
-                                    .background(NeonCyan.copy(alpha = 0.15f))
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp)
                             ) {
-                                Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(16.dp))
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(CircleShape)
+                                        .background(NeonCyan.copy(alpha = 0.15f))
+                                ) {
+                                    Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(16.dp))
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Calendar Log", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = TextPrimary, maxLines = 1)
+                                Text("Date & Time", fontSize = 9.sp, color = TextSecondary)
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text("Calendar Log", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = TextPrimary, maxLines = 1)
-                            Text("Date & Time", fontSize = 9.sp, color = TextSecondary)
+                        }
+
+                        // Missed Classes
+                        Surface(
+                            color = DarkSurfaceCard,
+                            shape = RoundedCornerShape(14.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, NeonCrimson.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { isMissedClassesOpen = true }
+                                .testTag("btn_dashboard_missed_classes")
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp)
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(CircleShape)
+                                        .background(NeonCrimson.copy(alpha = 0.15f))
+                                ) {
+                                    Icon(Icons.Default.EventBusy, contentDescription = null, tint = NeonCrimson, modifier = Modifier.size(16.dp))
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Missed Log", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = TextPrimary, maxLines = 1)
+                                Text("Filter & Fix", fontSize = 9.sp, color = TextSecondary)
+                            }
+                        }
+
+                        // College Fests & Breaks
+                        Surface(
+                            color = DarkSurfaceCard,
+                            shape = RoundedCornerShape(14.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, NeonPurple.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { isAcademicBreaksOpen = true }
+                                .testTag("btn_dashboard_fests_breaks")
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp)
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(CircleShape)
+                                        .background(NeonPurple.copy(alpha = 0.15f))
+                                ) {
+                                    Icon(Icons.Default.Celebration, contentDescription = null, tint = NeonPurple, modifier = Modifier.size(16.dp))
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Fests & Breaks", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = TextPrimary, maxLines = 1)
+                                Text("Tech/Holidays", fontSize = 9.sp, color = TextSecondary)
+                            }
                         }
                     }
 
-                    // Missed Classes
-                    Surface(
-                        color = DarkSurfaceCard,
-                        shape = RoundedCornerShape(14.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, NeonCrimson.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable { isMissedClassesOpen = true }
-                            .testTag("btn_dashboard_missed_classes")
+                    // Row 2: Past-Day Batch Edit, Semester & Backups, Sync Alarms
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp)
+                        // Past-Day Batch Audit
+                        Surface(
+                            color = DarkSurfaceCard,
+                            shape = RoundedCornerShape(14.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, NeonMint.copy(alpha = 0.4f)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { isDayWiseAttendanceOpen = true }
+                                .testTag("btn_dashboard_day_wise_edit")
                         ) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(CircleShape)
-                                    .background(NeonCrimson.copy(alpha = 0.15f))
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp)
                             ) {
-                                Icon(Icons.Default.EventBusy, contentDescription = null, tint = NeonCrimson, modifier = Modifier.size(16.dp))
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(CircleShape)
+                                        .background(NeonMint.copy(alpha = 0.15f))
+                                ) {
+                                    Icon(Icons.Default.EditCalendar, contentDescription = null, tint = NeonMint, modifier = Modifier.size(16.dp))
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Day Audit", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = TextPrimary, maxLines = 1)
+                                Text("Past Day Batch", fontSize = 9.sp, color = TextSecondary)
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text("Missed Log", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = TextPrimary, maxLines = 1)
-                            Text("Filter & Fix", fontSize = 9.sp, color = TextSecondary)
                         }
-                    }
 
-                    // College Fests & Breaks
-                    Surface(
-                        color = DarkSurfaceCard,
-                        shape = RoundedCornerShape(14.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, NeonPurple.copy(alpha = 0.5f)),
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable { isAcademicBreaksOpen = true }
-                            .testTag("btn_dashboard_fests_breaks")
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp)
+                        // Semester & Data Backup
+                        Surface(
+                            color = DarkSurfaceCard,
+                            shape = RoundedCornerShape(14.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, NeonAmber.copy(alpha = 0.4f)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { isSemesterManagementOpen = true }
+                                .testTag("btn_dashboard_semester_manage")
                         ) {
-                            Box(
-                                contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(CircleShape)
-                                    .background(NeonPurple.copy(alpha = 0.15f))
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp)
                             ) {
-                                Icon(Icons.Default.Celebration, contentDescription = null, tint = NeonPurple, modifier = Modifier.size(16.dp))
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(CircleShape)
+                                        .background(NeonAmber.copy(alpha = 0.15f))
+                                ) {
+                                    Icon(Icons.Default.School, contentDescription = null, tint = NeonAmber, modifier = Modifier.size(16.dp))
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Semester Archive", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = TextPrimary, maxLines = 1)
+                                Text("Lock & Backups", fontSize = 9.sp, color = TextSecondary)
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text("Fests & Breaks", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = TextPrimary, maxLines = 1)
-                            Text("Tech/Holidays", fontSize = 9.sp, color = TextSecondary)
+                        }
+
+                        // Phone Clock Alarms Sync
+                        val context = androidx.compose.ui.platform.LocalContext.current
+                        Surface(
+                            color = DarkSurfaceCard,
+                            shape = RoundedCornerShape(14.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, NeonCyan.copy(alpha = 0.4f)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable {
+                                    AlarmSchedulerHelper.syncFullWeekAlarmsWithPhoneClock(
+                                        context = context,
+                                        slots = allSlotsWithSubs,
+                                        leadHours = profile?.alarmLeadHours ?: 1.5
+                                    )
+                                }
+                                .testTag("btn_dashboard_sync_alarms")
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 10.dp)
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(CircleShape)
+                                        .background(NeonCyan.copy(alpha = 0.15f))
+                                ) {
+                                    Icon(Icons.Default.Alarm, contentDescription = null, tint = NeonCyan, modifier = Modifier.size(16.dp))
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text("Phone Alarms", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = TextPrimary, maxLines = 1)
+                                Text("Native Clock App", fontSize = 9.sp, color = TextSecondary)
+                            }
                         }
                     }
                 }
@@ -341,12 +459,12 @@ fun DashboardScreen(
                                         text = dayNames[dayIndex - 1],
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 13.sp,
-                                        color = if (isSelected) Color.Black else TextPrimary
+                                        color = if (isSelected) Color.White else TextPrimary
                                     )
                                     Text(
                                         text = "Day $dayIndex",
                                         fontSize = 10.sp,
-                                        color = if (isSelected) Color.Black.copy(alpha = 0.8f) else TextMuted
+                                        color = if (isSelected) Color.White.copy(alpha = 0.85f) else TextMuted
                                     )
                                 }
                             }
@@ -445,29 +563,29 @@ fun DashboardScreen(
                                 .clip(CircleShape)
                                 .background(
                                     androidx.compose.ui.graphics.Brush.linearGradient(
-                                        listOf(GeminiBlue, GeminiPurple)
+                                        listOf(AppTheme.colors.primary, AppTheme.colors.secondary)
                                     )
                                 )
                         ) {
-                            Icon(Icons.Default.AutoAwesome, contentDescription = "Draco AI", tint = Color.White)
+                            Icon(Icons.Default.AutoAwesome, contentDescription = "Attend AI", tint = Color.White)
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Ask Draco AI",
+                                text = "Ask AttendOS",
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = TextPrimary
                                 )
                             )
                             Text(
-                                text = "“Can I bunk DBMS today?” • “Best day for leave?”",
+                                text = "“Can I bunk today?” • “Midsem 75% target?”",
                                 style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        Icon(Icons.Default.ArrowForward, contentDescription = null, tint = GeminiCyan)
+                        Icon(Icons.Default.ArrowForward, contentDescription = null, tint = AppTheme.colors.secondary)
                     }
                 }
             }
@@ -497,6 +615,22 @@ fun DashboardScreen(
             onDismiss = { isAcademicBreaksOpen = false }
         )
     }
+
+    // Day-Wise Attendance Edit Dialog
+    if (isDayWiseAttendanceOpen) {
+        DayWiseAttendanceEditDialog(
+            viewModel = viewModel,
+            onDismiss = { isDayWiseAttendanceOpen = false }
+        )
+    }
+
+    // Semester Management & Export/Backup Dialog
+    if (isSemesterManagementOpen) {
+        SemesterManagementDialog(
+            viewModel = viewModel,
+            onDismiss = { isSemesterManagementOpen = false }
+        )
+    }
 }
 
 @Composable
@@ -505,11 +639,13 @@ fun DashboardTopBar(
     branch: String,
     streak: Int,
     notificationCount: Int,
+    isDark: Boolean,
+    onToggleTheme: () -> Unit,
     onOpenNotifications: () -> Unit,
     onOpenSettings: () -> Unit
 ) {
     Surface(
-        color = DarkBackground,
+        color = AppTheme.colors.background,
         border = androidx.compose.foundation.BorderStroke(0.dp, Color.Transparent),
         modifier = Modifier.statusBarsPadding()
     ) {
@@ -526,26 +662,26 @@ fun DashboardTopBar(
                         text = studentName,
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Black,
-                            color = TextPrimary
+                            color = AppTheme.colors.textPrimary
                         )
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Surface(
-                        color = NeonCyan.copy(alpha = 0.15f),
+                        color = AppTheme.colors.primary.copy(alpha = 0.15f),
                         shape = RoundedCornerShape(6.dp)
                     ) {
                         Text(
                             text = "DTU SE",
                             fontWeight = FontWeight.Bold,
                             fontSize = 10.sp,
-                            color = NeonCyan,
+                            color = AppTheme.colors.primary,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
                 }
                 Text(
                     text = branch,
-                    style = MaterialTheme.typography.bodySmall.copy(color = TextSecondary)
+                    style = MaterialTheme.typography.bodySmall.copy(color = AppTheme.colors.textSecondary)
                 )
             }
 
@@ -555,7 +691,7 @@ fun DashboardTopBar(
                     color = NeonGold.copy(alpha = 0.15f),
                     shape = RoundedCornerShape(12.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, NeonGold.copy(alpha = 0.4f)),
-                    modifier = Modifier.padding(end = 8.dp)
+                    modifier = Modifier.padding(end = 4.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -572,6 +708,18 @@ fun DashboardTopBar(
                     }
                 }
 
+                // Theme Mode Switcher
+                IconButton(
+                    onClick = onToggleTheme,
+                    modifier = Modifier.testTag("btn_dashboard_theme_toggle")
+                ) {
+                    Icon(
+                        imageVector = if (isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
+                        contentDescription = "Toggle Theme Mode",
+                        tint = AppTheme.colors.textPrimary
+                    )
+                }
+
                 // Notification Bell
                 IconButton(
                     onClick = onOpenNotifications,
@@ -586,7 +734,7 @@ fun DashboardTopBar(
                             }
                         }
                     ) {
-                        Icon(Icons.Default.Notifications, contentDescription = "Alerts", tint = TextPrimary)
+                        Icon(Icons.Default.Notifications, contentDescription = "Alerts", tint = AppTheme.colors.textPrimary)
                     }
                 }
 
@@ -595,7 +743,7 @@ fun DashboardTopBar(
                     onClick = onOpenSettings,
                     modifier = Modifier.testTag("btn_dashboard_settings")
                 ) {
-                    Icon(Icons.Default.Settings, contentDescription = "Settings", tint = TextPrimary)
+                    Icon(Icons.Default.Settings, contentDescription = "Settings", tint = AppTheme.colors.textPrimary)
                 }
             }
         }
@@ -625,10 +773,11 @@ fun OverallAttendanceHero(
     Surface(
         color = DarkSurfaceCard,
         shape = RoundedCornerShape(20.dp),
+        shadowElevation = if (AppTheme.colors.isDark) 0.dp else 3.dp,
         border = androidx.compose.foundation.BorderStroke(
             1.5.dp,
             Brush.linearGradient(
-                listOf(tier.color.copy(alpha = 0.8f), DarkBorder)
+                listOf(tier.displayColor.copy(alpha = 0.8f), DarkBorder)
             )
         ),
         modifier = Modifier
@@ -650,7 +799,7 @@ fun OverallAttendanceHero(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Surface(
-                            color = if (isNextExam) NeonCyan else Color.Transparent,
+                            color = if (isNextExam) AppTheme.colors.primary else Color.Transparent,
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
                                 .weight(1f)
@@ -661,14 +810,14 @@ fun OverallAttendanceHero(
                                 text = "🎯 Till Next Exam",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (isNextExam) Color.Black else TextSecondary,
+                                color = if (isNextExam) Color.White else TextSecondary,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.padding(vertical = 6.dp)
                             )
                         }
 
                         Surface(
-                            color = if (!isNextExam) NeonCyan else Color.Transparent,
+                            color = if (!isNextExam) AppTheme.colors.primary else Color.Transparent,
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
                                 .weight(1f)
@@ -679,7 +828,7 @@ fun OverallAttendanceHero(
                                 text = "🎓 Full Semester",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (!isNextExam) Color.Black else TextSecondary,
+                                color = if (!isNextExam) Color.White else TextSecondary,
                                 textAlign = TextAlign.Center,
                                 modifier = Modifier.padding(vertical = 6.dp)
                             )
@@ -718,7 +867,7 @@ fun OverallAttendanceHero(
                         text = if (isNextExam) "NEXT EXAM STANDING" else "FULL SEMESTER STANDING",
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
-                            color = tier.color,
+                            color = tier.displayColor,
                             letterSpacing = 1.sp
                         )
                     )
@@ -841,6 +990,7 @@ fun TodaySlotCard(
     Surface(
         color = DarkSurfaceCard,
         shape = RoundedCornerShape(16.dp),
+        shadowElevation = if (AppTheme.colors.isDark) 0.dp else 2.dp,
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
             if (tier.isDanger) NeonCrimson.copy(alpha = 0.6f) else DarkBorder
@@ -921,7 +1071,7 @@ fun TodaySlotCard(
                         text = "${String.format("%.1f", stats?.percentage ?: 0.0)}%",
                         style = MaterialTheme.typography.titleLarge.copy(
                             fontWeight = FontWeight.Black,
-                            color = tier.color
+                            color = tier.displayColor
                         )
                     )
                     TierBadge(tier = tier)

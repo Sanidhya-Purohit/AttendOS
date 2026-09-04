@@ -32,6 +32,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.example.data.local.dao.SlotWithSubject
 import com.example.data.local.entity.AttendanceRecordEntity
 import com.example.data.local.entity.SubjectEntity
+import com.example.ui.components.AttendOSDatePickerDialog
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.AttendanceViewModel
 import java.text.SimpleDateFormat
@@ -49,8 +50,10 @@ fun CalendarAttendanceDialog(
 
     val recordsByDate by viewModel.attendanceRecordsByDate.collectAsState()
 
-    // Calendar state
+    // Calendar state (Support 6 years, e.g. 2021 to 2027 if current year is 2026)
     val cal = remember { Calendar.getInstance() }
+    val currentYearBase = remember { cal.get(Calendar.YEAR) }
+    val calendarYears = remember(currentYearBase) { ((currentYearBase - 5)..(currentYearBase + 1)).toList() }
     var currentYear by remember { mutableIntStateOf(cal.get(Calendar.YEAR)) }
     var currentMonth by remember { mutableIntStateOf(cal.get(Calendar.MONTH)) } // 0-based
 
@@ -169,6 +172,48 @@ fun CalendarAttendanceDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
+                // 6-Year Selector Bar (e.g. 2021 to 2027)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                ) {
+                    Text(
+                        text = "Year:",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextSecondary,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.weight(1f).testTag("calendar_year_selector_row")
+                    ) {
+                        items(calendarYears) { yr ->
+                            val isSelected = yr == currentYear
+                            Surface(
+                                color = if (isSelected) NeonCyan else DarkSurfaceElevated,
+                                shape = RoundedCornerShape(8.dp),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    if (isSelected) NeonCyan else DarkBorder
+                                ),
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { currentYear = yr }
+                                    .testTag("chip_year_$yr")
+                            ) {
+                                Text(
+                                    text = "$yr",
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium,
+                                    color = if (isSelected) Color(0xFF130E24) else TextPrimary,
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Month Navigator
                 val monthNames = listOf(
                     "January", "February", "March", "April", "May", "June",
@@ -182,14 +227,21 @@ fun CalendarAttendanceDialog(
                     IconButton(
                         onClick = {
                             if (currentMonth == 0) {
-                                currentMonth = 11
-                                currentYear--
+                                if (currentYear > calendarYears.first()) {
+                                    currentMonth = 11
+                                    currentYear--
+                                }
                             } else {
                                 currentMonth--
                             }
-                        }
+                        },
+                        enabled = !(currentMonth == 0 && currentYear <= calendarYears.first())
                     ) {
-                        Icon(Icons.Default.ChevronLeft, contentDescription = "Previous Month", tint = NeonCyan)
+                        Icon(
+                            Icons.Default.ChevronLeft,
+                            contentDescription = "Previous Month",
+                            tint = if (currentMonth == 0 && currentYear <= calendarYears.first()) TextMuted else NeonCyan
+                        )
                     }
 
                     Text(
@@ -202,14 +254,21 @@ fun CalendarAttendanceDialog(
                     IconButton(
                         onClick = {
                             if (currentMonth == 11) {
-                                currentMonth = 0
-                                currentYear++
+                                if (currentYear < calendarYears.last()) {
+                                    currentMonth = 0
+                                    currentYear++
+                                }
                             } else {
                                 currentMonth++
                             }
-                        }
+                        },
+                        enabled = !(currentMonth == 11 && currentYear >= calendarYears.last())
                     ) {
-                        Icon(Icons.Default.ChevronRight, contentDescription = "Next Month", tint = NeonCyan)
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = "Next Month",
+                            tint = if (currentMonth == 11 && currentYear >= calendarYears.last()) TextMuted else NeonCyan
+                        )
                     }
                 }
 
@@ -294,7 +353,7 @@ fun CalendarAttendanceDialog(
                                         text = "$day",
                                         fontSize = 11.sp,
                                         fontWeight = if (isSelected || isToday) FontWeight.Black else FontWeight.Normal,
-                                        color = if (isSelected) Color.Black else TextPrimary
+                                        color = if (isSelected) ButtonTextOnPrimary else TextPrimary
                                     )
                                     // Dot indicators for attendance logged
                                     if (dayRecords.isNotEmpty() && !isSelected) {
@@ -483,59 +542,23 @@ fun CalendarAttendanceDialog(
                         .fillMaxWidth()
                         .testTag("btn_done_calendar_attendance")
                 ) {
-                    Text("Done", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Done", color = ButtonTextOnPrimary, fontWeight = FontWeight.Bold)
                 }
             }
         }
     }
 
-    // Session Start Date Picker Dialog
+    // Session Start Date Picker Dialog (Interactive Calendar Date Picker)
     if (isSessionDatePickerOpen) {
-        AlertDialog(
-            onDismissRequest = { isSessionDatePickerOpen = false },
-            containerColor = DarkSurface,
-            title = {
-                Text("Set Session Start Date", fontWeight = FontWeight.Bold, color = TextPrimary)
+        AttendOSDatePickerDialog(
+            title = "Select Academic Session Start Date",
+            initialDate = sessionStartDate,
+            onDateSelected = { selectedDate ->
+                sessionStartDate = selectedDate
+                viewModel.setSessionStartDate(selectedDate)
+                isSessionDatePickerOpen = false
             },
-            text = {
-                Column {
-                    Text(
-                        "Enter the starting date of your academic session / semester (YYYY-MM-DD):",
-                        fontSize = 12.sp,
-                        color = TextSecondary
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = sessionStartDate,
-                        onValueChange = { sessionStartDate = it },
-                        placeholder = { Text("2026-08-01", color = TextMuted) },
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = NeonCyan,
-                            unfocusedBorderColor = DarkBorder,
-                            focusedTextColor = TextPrimary,
-                            unfocusedTextColor = TextPrimary
-                        ),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.setSessionStartDate(sessionStartDate)
-                        isSessionDatePickerOpen = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
-                ) {
-                    Text("Save", color = Color.Black, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { isSessionDatePickerOpen = false }) {
-                    Text("Cancel", color = TextMuted)
-                }
-            }
+            onDismiss = { isSessionDatePickerOpen = false }
         )
     }
 }
@@ -630,7 +653,7 @@ fun DateSlotAttendanceCard(
                     onClick = { onMarkStatus("PRESENT") },
                     colors = ButtonDefaults.buttonColors(
                         containerColor = if (currentStatus == "PRESENT") NeonEmerald else NeonEmerald.copy(alpha = 0.15f),
-                        contentColor = if (currentStatus == "PRESENT") Color.Black else NeonEmerald
+                        contentColor = if (currentStatus == "PRESENT") (if (AppTheme.colors.isDark) Color.Black else Color.White) else NeonEmerald
                     ),
                     shape = RoundedCornerShape(8.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, NeonEmerald),

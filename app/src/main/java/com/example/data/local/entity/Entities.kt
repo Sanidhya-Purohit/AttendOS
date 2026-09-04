@@ -5,10 +5,29 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
+@Entity(tableName = "semesters")
+data class SemesterEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val semesterNumber: Int = 5,
+    val title: String = "Semester 5 (Autumn 2026)",
+    val academicYear: String = "2026-2027",
+    val startDate: String = "2026-08-01",
+    val endDate: String = "2026-12-15",
+    val isLocked: Boolean = false,
+    val isCurrent: Boolean = true,
+    val lockedAtTimestamp: Long = 0L,
+    val finalAttendancePercentage: Double = 0.0,
+    val totalConducted: Int = 0,
+    val totalAttended: Int = 0,
+    val notes: String = ""
+)
+
 @Entity(tableName = "subjects")
 data class SubjectEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
+    val semesterId: Long = 1L,
     val name: String,
     val code: String,
     val conductedClasses: Int = 0,
@@ -17,7 +36,6 @@ data class SubjectEntity(
     val emergencyBuffer: Int = 3,
     val colorHex: String = "#00E5FF",
     val defaultRoom: String = "Pragya Bhavan PB-02",
-    val professorName: String = "Prof. Sharma",
     val category: String = "Core", // Core, Elective, Lab, MOOC
     val credits: Int = 4
 )

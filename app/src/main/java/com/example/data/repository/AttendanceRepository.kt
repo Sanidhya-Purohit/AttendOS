@@ -5,6 +5,7 @@ import com.example.data.local.dao.SlotWithSubject
 import com.example.data.local.entity.AcademicBreakEntity
 import com.example.data.local.entity.AttendanceRecordEntity
 import com.example.data.local.entity.ScheduleSlotEntity
+import com.example.data.local.entity.SemesterEntity
 import com.example.data.local.entity.SubjectEntity
 import com.example.data.local.entity.UserProfileEntity
 import kotlinx.coroutines.flow.Flow
@@ -13,18 +14,145 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+data class DayAttendanceRecordUpdate(
+    val subjectId: Long,
+    val slotTime: String,
+    val status: String, // "PRESENT", "ABSENT", "CANCELLED", "DUTY_LEAVE", "NONE"
+    val note: String = ""
+)
+
 class AttendanceRepository(private val database: AppDatabase) {
     private val subjectDao = database.subjectDao()
     private val slotDao = database.scheduleSlotDao()
     private val recordDao = database.attendanceRecordDao()
     private val profileDao = database.userProfileDao()
     private val breakDao = database.academicBreakDao()
+    private val semesterDao = database.semesterDao()
 
     val allSubjects: Flow<List<SubjectEntity>> = subjectDao.getAllSubjects()
     val allSlotsWithSubjects: Flow<List<SlotWithSubject>> = slotDao.getAllSlotsWithSubjects()
     val userProfile: Flow<UserProfileEntity?> = profileDao.getProfileFlow()
     val recentRecords: Flow<List<AttendanceRecordEntity>> = recordDao.getAllRecords()
     val allBreaks: Flow<List<AcademicBreakEntity>> = breakDao.getAllBreaks()
+    val allSemesters: Flow<List<SemesterEntity>> = semesterDao.getAllSemesters()
+    val currentSemester: Flow<SemesterEntity?> = semesterDao.getCurrentSemesterFlow()
+
+    suspend fun getCurrentSemester(): SemesterEntity? = semesterDao.getCurrentSemester()
+
+    suspend fun getSemesterById(id: Long): SemesterEntity? = semesterDao.getSemesterById(id)
+
+    suspend fun createNewSemester(
+        semesterNumber: Int,
+        title: String,
+        academicYear: String = "2026-2027",
+        startDate: String,
+        endDate: String,
+        lockCurrent: Boolean = false
+    ): Long {
+        val current = semesterDao.getCurrentSemester()
+        if (current != null && lockCurrent) {
+            val subjectsList = subjectDao.getAllSubjectsList()
+            val totalCond = subjectsList.sumOf { it.conductedClasses }
+            val totalAtt = subjectsList.sumOf { it.attendedClasses }
+            val finalPct = if (totalCond > 0) (totalAtt.toDouble() / totalCond) * 100.0 else 0.0
+            semesterDao.lockSemester(
+                id = current.id,
+                finalPct = finalPct,
+                conducted = totalCond,
+                attended = totalAtt,
+                timestamp = System.currentTimeMillis()
+            )
+        }
+
+        semesterDao.clearCurrentSemesterFlags()
+        val newSemester = SemesterEntity(
+            semesterNumber = semesterNumber,
+            title = title,
+            academicYear = academicYear,
+            startDate = startDate,
+            endDate = endDate,
+            isLocked = false,
+            isCurrent = true
+        )
+        val newId = semesterDao.insertSemester(newSemester)
+
+        // Update profile semester number
+        val profile = profileDao.getProfile()
+        if (profile != null) {
+            profileDao.updateProfile(
+                profile.copy(
+                    semester = semesterNumber,
+                    semesterStartDate = startDate,
+                    endsemDate = endDate
+                )
+            )
+        }
+        return newId
+    }
+
+    suspend fun lockCurrentSemester() {
+        val current = semesterDao.getCurrentSemester() ?: return
+        val subjectsList = subjectDao.getAllSubjectsList()
+        val totalCond = subjectsList.sumOf { it.conductedClasses }
+        val totalAtt = subjectsList.sumOf { it.attendedClasses }
+        val finalPct = if (totalCond > 0) (totalAtt.toDouble() / totalCond) * 100.0 else 0.0
+        semesterDao.lockSemester(
+            id = current.id,
+            finalPct = finalPct,
+            conducted = totalCond,
+            attended = totalAtt,
+            timestamp = System.currentTimeMillis()
+        )
+    }
+
+    suspend fun unlockSemester(semesterId: Long) {
+        val sem = semesterDao.getSemesterById(semesterId) ?: return
+        semesterDao.updateSemester(sem.copy(isLocked = false))
+    }
+
+    suspend fun switchCurrentSemester(semesterId: Long) {
+        val target = semesterDao.getSemesterById(semesterId) ?: return
+        semesterDao.clearCurrentSemesterFlags()
+        semesterDao.setCurrentSemester(semesterId)
+        val profile = profileDao.getProfile()
+        if (profile != null) {
+            profileDao.updateProfile(
+                profile.copy(
+                    semester = target.semesterNumber,
+                    semesterStartDate = target.startDate,
+                    endsemDate = target.endDate
+                )
+            )
+        }
+    }
+
+    suspend fun batchUpdateDayAttendance(
+        date: String,
+        updates: List<DayAttendanceRecordUpdate>
+    ) {
+        for (update in updates) {
+            markAttendanceForDate(
+                subjectId = update.subjectId,
+                status = update.status,
+                date = date,
+                slotTime = update.slotTime,
+                note = update.note
+            )
+        }
+    }
+
+    suspend fun markDayAsHoliday(date: String, holidayTitle: String = "Holiday / College Suspension") {
+        breakDao.insertBreak(
+            AcademicBreakEntity(
+                title = holidayTitle,
+                startDate = date,
+                endDate = date,
+                category = "HOLIDAY",
+                description = "Classes suspended on $date ($holidayTitle)",
+                affectsAllClasses = true
+            )
+        )
+    }
 
     fun getSlotsForDay(dayOfWeek: Int): Flow<List<SlotWithSubject>> {
         return slotDao.getSlotsForDayWithSubjects(dayOfWeek)
@@ -338,8 +466,22 @@ class AttendanceRepository(private val database: AppDatabase) {
     }
 
     suspend fun loadDTUDefaultSubjectsAndSchedule(freshZeroAttendance: Boolean = false) {
+        val currentSem = semesterDao.getCurrentSemester()
+        val semId = currentSem?.id ?: semesterDao.insertSemester(
+            SemesterEntity(
+                semesterNumber = 5,
+                title = "Semester 5 (Autumn 2026)",
+                academicYear = "2026-2027",
+                startDate = "2026-08-01",
+                endDate = "2026-12-15",
+                isLocked = false,
+                isCurrent = true
+            )
+        )
+
         val dtuSubjects = listOf(
             SubjectEntity(
+                semesterId = semId,
                 name = "Software Engineering",
                 code = "SE-301",
                 conductedClasses = if (freshZeroAttendance) 0 else 24,
@@ -348,11 +490,11 @@ class AttendanceRepository(private val database: AppDatabase) {
                 emergencyBuffer = 3,
                 colorHex = "#00E5FF", // Neon Cyan
                 defaultRoom = "Pragya Bhavan PB-02",
-                professorName = "Prof. Ruchika M.",
                 category = "Core",
                 credits = 4
             ),
             SubjectEntity(
+                semesterId = semId,
                 name = "Machine Learning",
                 code = "SE-303",
                 conductedClasses = if (freshZeroAttendance) 0 else 22,
@@ -361,11 +503,11 @@ class AttendanceRepository(private val database: AppDatabase) {
                 emergencyBuffer = 3,
                 colorHex = "#10B981", // Emerald
                 defaultRoom = "Pragya Bhavan PB-04",
-                professorName = "Prof. Vinod Kumar",
                 category = "Core",
                 credits = 4
             ),
             SubjectEntity(
+                semesterId = semId,
                 name = "Operating Systems",
                 code = "SE-305",
                 conductedClasses = if (freshZeroAttendance) 0 else 25,
@@ -374,11 +516,11 @@ class AttendanceRepository(private val database: AppDatabase) {
                 emergencyBuffer = 2,
                 colorHex = "#F59E0B", // Amber Gold
                 defaultRoom = "SPS-09 (Science Block)",
-                professorName = "Prof. Abhilasha S.",
                 category = "Core",
                 credits = 4
             ),
             SubjectEntity(
+                semesterId = semId,
                 name = "Database Management Systems",
                 code = "SE-307",
                 conductedClasses = if (freshZeroAttendance) 0 else 20,
@@ -387,11 +529,11 @@ class AttendanceRepository(private val database: AppDatabase) {
                 emergencyBuffer = 3,
                 colorHex = "#EA580C", // Shortage Orange
                 defaultRoom = "AB-4 Room 204",
-                professorName = "Prof. Manoj Kumar",
                 category = "Core",
                 credits = 4
             ),
             SubjectEntity(
+                semesterId = semId,
                 name = "Software Engineering Lab",
                 code = "SE-309",
                 conductedClasses = if (freshZeroAttendance) 0 else 8,
@@ -400,11 +542,11 @@ class AttendanceRepository(private val database: AppDatabase) {
                 emergencyBuffer = 1,
                 colorHex = "#A855F7", // Purple
                 defaultRoom = "AB-4 Software Lab-1",
-                professorName = "Lab Incharge",
                 category = "Lab",
                 credits = 2
             ),
             SubjectEntity(
+                semesterId = semId,
                 name = "ML & Data Science Lab",
                 code = "SE-311",
                 conductedClasses = if (freshZeroAttendance) 0 else 8,
@@ -413,21 +555,20 @@ class AttendanceRepository(private val database: AppDatabase) {
                 emergencyBuffer = 1,
                 colorHex = "#3B82F6", // Blue
                 defaultRoom = "Pragya Bhavan AI Lab 302",
-                professorName = "Lab Faculty",
                 category = "Lab",
                 credits = 2
             ),
             SubjectEntity(
-                name = "Economics for Engineers",
-                code = "HU-301",
+                semesterId = semId,
+                name = "AEC / VAC (Selected)",
+                code = "VAC-101",
                 conductedClasses = if (freshZeroAttendance) 0 else 16,
                 attendedClasses = if (freshZeroAttendance) 0 else 14,
                 targetPercentage = 75.0,
                 emergencyBuffer = 2,
                 colorHex = "#14B8A6", // Teal
                 defaultRoom = "Tw-1 (Technological Wing)",
-                professorName = "Prof. Humanities",
-                category = "Elective",
+                category = "VAC",
                 credits = 3
             )
         )

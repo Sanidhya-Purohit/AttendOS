@@ -112,7 +112,7 @@ fun SubjectsScreen(
 
                             Button(
                                 onClick = { isAddSubjectDialogOpen = true },
-                                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black),
+                                colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.primary, contentColor = Color.White),
                                 shape = RoundedCornerShape(12.dp),
                                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                                 modifier = Modifier.testTag("btn_add_subject")
@@ -142,7 +142,7 @@ fun SubjectsScreen(
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Surface(
-                                    color = if (isNextExam) NeonCyan else Color.Transparent,
+                                    color = if (isNextExam) AppTheme.colors.primary else Color.Transparent,
                                     shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier.clickable { viewModel.setCalculationMode("NEXT_EXAM") }
                                 ) {
@@ -150,13 +150,13 @@ fun SubjectsScreen(
                                         text = "🎯 Next Exam",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp,
-                                        color = if (isNextExam) Color.Black else TextSecondary,
+                                        color = if (isNextExam) Color.White else TextSecondary,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Surface(
-                                    color = if (!isNextExam) NeonCyan else Color.Transparent,
+                                    color = if (!isNextExam) AppTheme.colors.primary else Color.Transparent,
                                     shape = RoundedCornerShape(8.dp),
                                     modifier = Modifier.clickable { viewModel.setCalculationMode("FULL_SEMESTER") }
                                 ) {
@@ -164,7 +164,7 @@ fun SubjectsScreen(
                                         text = "🎓 Full Sem",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp,
-                                        color = if (!isNextExam) Color.Black else TextSecondary,
+                                        color = if (!isNextExam) Color.White else TextSecondary,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                 }
@@ -172,7 +172,7 @@ fun SubjectsScreen(
 
                             Text(
                                 text = "Cutoff: $sampleCutoff",
-                                color = NeonCyan,
+                                color = AppTheme.colors.primary,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Medium
                             )
@@ -314,6 +314,7 @@ fun SubjectDetailedCard(
     Surface(
         color = DarkSurfaceCard,
         shape = RoundedCornerShape(18.dp),
+        shadowElevation = if (AppTheme.colors.isDark) 0.dp else 2.dp,
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
             if (isDanger) NeonCrimson.copy(alpha = 0.7f) else DarkBorder
@@ -333,14 +334,14 @@ fun SubjectDetailedCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
-                            color = tier.color.copy(alpha = 0.15f),
+                            color = tier.badgeBgColor,
                             shape = RoundedCornerShape(6.dp)
                         ) {
                             Text(
                                 text = stat.subject.code,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 10.sp,
-                                color = tier.color,
+                                color = tier.displayColor,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
@@ -376,7 +377,7 @@ fun SubjectDetailedCard(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "• ${stat.subject.professorName}",
+                            text = "• ${stat.subject.category}",
                             style = MaterialTheme.typography.bodySmall.copy(color = TextMuted, fontSize = 11.sp)
                         )
                     }
@@ -529,7 +530,6 @@ fun SubjectDetailDialog(
     var name by remember { mutableStateOf(subject.name) }
     var code by remember { mutableStateOf(subject.code) }
     var room by remember { mutableStateOf(subject.defaultRoom) }
-    var prof by remember { mutableStateOf(subject.professorName) }
     var attended by remember { mutableIntStateOf(subject.attendedClasses) }
     var conducted by remember { mutableIntStateOf(subject.conductedClasses) }
     var targetPct by remember { mutableDoubleStateOf(subject.targetPercentage) }
@@ -585,7 +585,6 @@ fun SubjectDetailDialog(
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text("Classroom Location: ${subject.defaultRoom}", fontWeight = FontWeight.Bold, color = NeonCyan, fontSize = 12.sp)
-                                Text("Faculty: ${subject.professorName}", color = TextSecondary, fontSize = 12.sp)
                                 Text("Code: ${subject.code} (${subject.category})", color = TextSecondary, fontSize = 12.sp)
                                 Divider(color = DarkBorder, modifier = Modifier.padding(vertical = 6.dp))
                                 Text("Attended: ${subject.attendedClasses} of ${subject.conductedClasses} classes", fontWeight = FontWeight.Bold, color = TextPrimary)
@@ -626,7 +625,7 @@ fun SubjectDetailDialog(
                                 colors = ButtonDefaults.buttonColors(containerColor = NeonEmerald),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text("Mark Present", color = Color.Black, fontWeight = FontWeight.Bold)
+                                Text("Mark Present", color = if (AppTheme.colors.isDark) Color.Black else Color.White, fontWeight = FontWeight.Bold)
                             }
                             Button(
                                 onClick = onMarkAbsent,
@@ -657,12 +656,6 @@ fun SubjectDetailDialog(
                                 value = room,
                                 onValueChange = { room = it },
                                 label = { Text("Classroom (e.g. Pragya Bhavan PB-02, AB-4)") },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            OutlinedTextField(
-                                value = prof,
-                                onValueChange = { prof = it },
-                                label = { Text("Professor / Faculty Name") },
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -700,7 +693,6 @@ fun SubjectDetailDialog(
                                 name = name,
                                 code = code,
                                 defaultRoom = room,
-                                professorName = prof,
                                 attendedClasses = attended,
                                 conductedClasses = conducted,
                                 targetPercentage = targetPct,
@@ -709,9 +701,9 @@ fun SubjectDetailDialog(
                         )
                         isEditing = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
+                    colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.primary, contentColor = Color.White)
                 ) {
-                    Text("Save Changes", color = Color.Black, fontWeight = FontWeight.Bold)
+                    Text("Save Changes", fontWeight = FontWeight.Bold)
                 }
             }
         },
@@ -737,7 +729,6 @@ fun AddOrEditSubjectDialog(
     var name by remember { mutableStateOf(subjectToEdit?.name ?: "") }
     var code by remember { mutableStateOf(subjectToEdit?.code ?: "") }
     var room by remember { mutableStateOf(subjectToEdit?.defaultRoom ?: "Pragya Bhavan PB-02") }
-    var prof by remember { mutableStateOf(subjectToEdit?.professorName ?: "DTU Faculty") }
     var category by remember { mutableStateOf(subjectToEdit?.category ?: "Core") }
     var attended by remember { mutableIntStateOf(subjectToEdit?.attendedClasses ?: 0) }
     var conducted by remember { mutableIntStateOf(subjectToEdit?.conductedClasses ?: 0) }
@@ -784,14 +775,6 @@ fun AddOrEditSubjectDialog(
                     )
                 }
                 item {
-                    OutlinedTextField(
-                        value = prof,
-                        onValueChange = { prof = it },
-                        label = { Text("Faculty / Professor Name") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-                item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(
                             value = "$attended",
@@ -819,7 +802,6 @@ fun AddOrEditSubjectDialog(
                                 name = name,
                                 code = code.ifBlank { "DTU-SE" },
                                 defaultRoom = room,
-                                professorName = prof,
                                 category = category,
                                 attendedClasses = attended,
                                 conductedClasses = conducted,
@@ -829,7 +811,7 @@ fun AddOrEditSubjectDialog(
                         )
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black)
+                colors = ButtonDefaults.buttonColors(containerColor = AppTheme.colors.primary, contentColor = Color.White)
             ) {
                 Text("Save Subject", fontWeight = FontWeight.Bold)
             }

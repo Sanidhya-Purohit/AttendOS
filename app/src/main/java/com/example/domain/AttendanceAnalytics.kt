@@ -374,7 +374,7 @@ object AttendanceCalculator {
         }
     }
 
-    private fun calculateClassesToAttend(attended: Int, conducted: Int, target: Double): Int {
+    fun calculateClassesToAttend(attended: Int, conducted: Int, target: Double): Int {
         if (target >= 100.0) {
             return if (attended < conducted) 99 else 0
         }
@@ -385,7 +385,7 @@ object AttendanceCalculator {
         return max(0, result)
     }
 
-    private fun calculateClassesToAttendWithBuffer(attended: Int, conducted: Int, target: Double, buffer: Int): Int {
+    fun calculateClassesToAttendWithBuffer(attended: Int, conducted: Int, target: Double, buffer: Int): Int {
         val num = (target * (conducted + buffer)) - (100.0 * attended)
         val den = 100.0 - target
         if (den <= 0) return 0
@@ -393,7 +393,7 @@ object AttendanceCalculator {
         return max(0, result)
     }
 
-    private fun calculateBunkCapacity(attended: Int, conducted: Int, target: Double): Int {
+    fun calculateBunkCapacity(attended: Int, conducted: Int, target: Double): Int {
         if (target <= 0.0) return 99
         val num = (100.0 * attended) - (target * conducted)
         if (num <= 0) return 0

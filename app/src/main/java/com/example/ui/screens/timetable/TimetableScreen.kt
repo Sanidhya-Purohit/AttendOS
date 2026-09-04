@@ -186,9 +186,9 @@ fun TimetableScreen(
                             items((1..6).toList()) { dayIdx ->
                                 val isSelected = dayIdx == selectedDay && !isFullWeekMatrixView
                                 Surface(
-                                    color = if (isSelected) NeonCyan else DarkSurfaceCard,
+                                    color = if (isSelected) AppTheme.colors.primary else DarkSurfaceCard,
                                     shape = RoundedCornerShape(10.dp),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) NeonCyan else DarkBorder),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) AppTheme.colors.primary else DarkBorder),
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(10.dp))
                                         .clickable {
@@ -200,7 +200,7 @@ fun TimetableScreen(
                                         text = shortDayNames[dayIdx - 1],
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
-                                        color = if (isSelected) Color.Black else TextPrimary,
+                                        color = if (isSelected) Color.White else TextPrimary,
                                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                                     )
                                 }
@@ -247,7 +247,7 @@ fun TimetableScreen(
                             CircularProgressIndicator(color = NeonPurple, modifier = Modifier.size(24.dp))
                             Spacer(modifier = Modifier.width(12.dp))
                             Column {
-                                Text("Gemini AI Analyzing Timetable...", fontWeight = FontWeight.Bold, color = TextPrimary)
+                                Text("AttendOS AI Analyzing Timetable...", fontWeight = FontWeight.Bold, color = TextPrimary)
                                 Text("Extracting DTU subjects, classrooms & slots...", color = TextSecondary, fontSize = 11.sp)
                             }
                         }
@@ -401,7 +401,7 @@ fun TimetableScreen(
             confirmButton = {
                 Button(
                     onClick = { viewModel.applyParsedSchedule(parsedSlotsReview!!) },
-                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black)
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = ButtonTextOnPrimary)
                 ) {
                     Text("Apply to My Timetable", fontWeight = FontWeight.Bold)
                 }
@@ -764,7 +764,7 @@ fun AddOrEditSlotDialog(
                         )
                     )
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = Color.Black)
+                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan, contentColor = ButtonTextOnPrimary)
             ) {
                 Text("Save Slot", fontWeight = FontWeight.Bold)
             }
@@ -800,7 +800,7 @@ fun createSampleDTUTimetableBitmap(): Bitmap {
     canvas.drawText("Wed 09:00: Operating Systems (SPS-09)", 30f, 200f, textPaint)
     canvas.drawText("Wed 14:00: ML & DS Lab (Pragya Bhavan AI Lab 302)", 30f, 230f, textPaint)
     canvas.drawText("Thu 09:00: Software Engineering (PB-02)", 30f, 260f, textPaint)
-    canvas.drawText("Fri 10:00: Economics for Engineers (Tw-1)", 30f, 290f, textPaint)
+    canvas.drawText("Fri 10:00: AEC / VAC (Selected) (Tw-1)", 30f, 290f, textPaint)
 
     return bitmap
 }

@@ -148,16 +148,16 @@ fun BulkUpdateAttendanceDialog(
 
                                     // Calculated Percentage Badge
                                     Surface(
-                                        color = tier.color.copy(alpha = 0.15f),
+                                        color = tier.badgeBgColor,
                                         shape = RoundedCornerShape(8.dp),
-                                        border = androidx.compose.foundation.BorderStroke(1.dp, tier.color.copy(alpha = 0.5f)),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, tier.displayColor.copy(alpha = 0.5f)),
                                         modifier = Modifier.padding(start = 8.dp)
                                     ) {
                                         Text(
                                             text = "${String.format("%.1f", pct)}% • ${tier.badgeLabel}",
                                             fontSize = 11.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = tier.color,
+                                            color = tier.displayColor,
                                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                         )
                                     }
@@ -283,9 +283,9 @@ fun BulkUpdateAttendanceDialog(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.weight(1.5f).testTag("btn_save_bulk_attendance")
                     ) {
-                        Icon(Icons.Default.Check, contentDescription = null, tint = DarkBackground)
+                        Icon(Icons.Default.Check, contentDescription = null, tint = ButtonTextOnPrimary)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Save Changes", color = DarkBackground, fontWeight = FontWeight.Bold)
+                        Text("Save Changes", color = ButtonTextOnPrimary, fontWeight = FontWeight.Bold)
                     }
                 }
             }

@@ -212,7 +212,7 @@ fun ManualCoursesPhase(
         SubjectEntity(name = "Database Management Systems", code = "SE-307", credits = 4, defaultRoom = "AB-4 Room 204", colorHex = "#EA580C", category = "Core"),
         SubjectEntity(name = "Software Engineering Lab", code = "SE-309", credits = 2, defaultRoom = "AB-4 Lab-1", colorHex = "#A855F7", category = "Lab"),
         SubjectEntity(name = "ML & Data Science Lab", code = "SE-311", credits = 2, defaultRoom = "PB AI Lab 302", colorHex = "#3B82F6", category = "Lab"),
-        SubjectEntity(name = "Economics for Engineers", code = "HU-301", credits = 3, defaultRoom = "Tw-1 Tech Wing", colorHex = "#14B8A6", category = "Elective")
+        SubjectEntity(name = "AEC / VAC (Selected)", code = "VAC-101", credits = 3, defaultRoom = "Tw-1 Tech Wing", colorHex = "#14B8A6", category = "VAC")
     )
 
     LazyColumn(
@@ -400,9 +400,9 @@ fun ManualCoursesPhase(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth().height(46.dp).testTag("btn_add_course_to_list")
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, tint = DarkBackground)
+                        Icon(Icons.Default.Add, contentDescription = null, tint = ButtonTextOnPrimary)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Add Course to Schedule", color = DarkBackground, fontWeight = FontWeight.Bold)
+                        Text("Add Course to Schedule", color = ButtonTextOnPrimary, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -543,9 +543,9 @@ fun ManualCoursesPhase(
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth().height(50.dp).testTag("btn_proceed_to_classes")
             ) {
-                Text("Proceed to Day-by-Day Scheduling", color = DarkBackground, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                Text("Proceed to Day-by-Day Scheduling", color = ButtonTextOnPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 Spacer(modifier = Modifier.width(6.dp))
-                Icon(Icons.Default.ArrowForward, contentDescription = null, tint = DarkBackground)
+                Icon(Icons.Default.ArrowForward, contentDescription = null, tint = ButtonTextOnPrimary)
             }
         }
     }
@@ -956,9 +956,9 @@ fun ManualClassesPhase(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(2f).height(48.dp).testTag("btn_save_manual_schedule")
                 ) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = DarkBackground)
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = ButtonTextOnPrimary)
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Apply Schedule (${slots.size} Slots)", color = DarkBackground, fontWeight = FontWeight.Bold)
+                    Text("Apply Schedule (${slots.size} Slots)", color = ButtonTextOnPrimary, fontWeight = FontWeight.Bold)
                 }
             }
         }
